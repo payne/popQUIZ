@@ -2,7 +2,19 @@ import { defineConfig } from 'vitest/config';
 import preact from '@preact/preset-vite';
 import { cloudflare } from '@cloudflare/vite-plugin';
 import { VitePWA } from 'vite-plugin-pwa';
+import { execSync } from 'node:child_process';
 import pkg from './package.json' with { type: 'json' };
+
+/** Last commit's short hash and date (YYYY-MM-DD), for the About page. "unknown" outside a git checkout. */
+function git(args: string): string {
+  try {
+    return execSync(`git ${args}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return 'unknown';
+  }
+}
+const COMMIT_HASH = git('rev-parse --short HEAD');
+const COMMIT_DATE = git('log -1 --format=%cs');
 
 const now = new Date();
 const BUILD_DATE = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; // local date
@@ -11,6 +23,8 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
     __BUILD_DATE__: JSON.stringify(BUILD_DATE),
+    __COMMIT_HASH__: JSON.stringify(COMMIT_HASH),
+    __COMMIT_DATE__: JSON.stringify(COMMIT_DATE),
   },
   build: { outDir: 'dist' },
   plugins: [

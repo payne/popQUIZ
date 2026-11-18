@@ -62,7 +62,7 @@ describe('create quiz', () => {
 
   it('rejects bad input', async () => {
     expect((await create({ pool: 'novice' })).body.code).toBe('bad_request');
-    expect((await create({ mode: 'custom', count: 3, subelements: ['T5'] })).body.error).toMatch(/between 5 and/);
+    expect((await create({ mode: 'custom', count: 0, subelements: ['T5'] })).body.error).toMatch(/between 1 and/);
     expect((await create({ name: '   ' })).body.code).toBe('invalid_name');
     expect((await create({ name: 'x'.repeat(21) })).status).toBe(400);
     expect((await call('POST', '/quizzes', 'nope')).status).toBe(400);

@@ -1,4 +1,4 @@
-// Two routes: "/" (home) and "/<CODE>" (a quiz). Share links are pq.n3pay.net/<CODE>.
+// Routes: "/" (home), "/about", and "/<CODE>" (a quiz). Share links are pq.n3pay.net/<CODE>.
 
 import { useEffect, useState } from 'preact/hooks';
 import { CODE_RE } from '../shared/api.ts';

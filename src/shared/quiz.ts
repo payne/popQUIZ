@@ -16,7 +16,7 @@ export interface QuizSpec {
 /** Returns a float in [0, 1). Injectable so tests are deterministic. */
 export type Rng = () => number;
 
-export const CUSTOM_MIN = 5;
+export const CUSTOM_MIN = 1;
 export const CUSTOM_PRESETS = [10, 20] as const;
 
 /** One random question from each group, in syllabus (pool) order — like a printed VE exam. */

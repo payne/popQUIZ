@@ -1198,3 +1198,18 @@ a.qid-link {
 a.qid-link:hover {
   text-decoration-style: solid;
 }
+
+/* ---------- About ---------- */
+.about-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  margin: 0;
+}
+.about-facts dt {
+  color: var(--muted);
+}
+.about-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

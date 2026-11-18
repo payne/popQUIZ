@@ -38,9 +38,9 @@ describe('buildCustomQuiz', () => {
     );
   });
 
-  it('rejects counts outside 5…available and empty selections', () => {
-    expect(() => buildCustomQuiz(tech, 4, ['T1'])).toThrow(/between 5 and 68/);
-    expect(() => buildCustomQuiz(tech, 69, ['T1'])).toThrow(/between 5 and 68/);
+  it('rejects counts outside 1…available and empty selections', () => {
+    expect(() => buildCustomQuiz(tech, 0, ['T1'])).toThrow(/between 1 and 68/);
+    expect(() => buildCustomQuiz(tech, 69, ['T1'])).toThrow(/between 1 and 68/);
     expect(() => buildCustomQuiz(tech, 10, [])).toThrow(/at least one/);
   });
 });

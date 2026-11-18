@@ -28,10 +28,11 @@ interface MenuProps {
   open: boolean;
   onClose: () => void;
   onNewQuiz: () => void;
+  onAbout: () => void;
   quiz?: QuizMenu;
 }
 
-export function Menu({ open, onClose, onNewQuiz, quiz }: MenuProps) {
+export function Menu({ open, onClose, onNewQuiz, onAbout, quiz }: MenuProps) {
   const pwa = usePwa();
   const [theme, setTheme] = useState<Theme>(() => (getString('pq:theme') as Theme | null) ?? 'system');
   const [dialog, setDialog] = useState<null | 'reload' | 'reset' | 'ios'>(null);
@@ -116,6 +117,11 @@ export function Menu({ open, onClose, onNewQuiz, quiz }: MenuProps) {
               </button>
             </li>
           )}
+          <li>
+            <button type="button" onClick={act(onAbout)}>
+              ⓘ About
+            </button>
+          </li>
           <li class="menu-theme">
             <span>Theme</span>
             <div class="segmented" role="radiogroup" aria-label="Theme">

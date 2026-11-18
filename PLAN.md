@@ -30,7 +30,7 @@ Decisions below were settled in a design grilling session on 2026-11-17 (Q1–Q4
 
 - **Anyone** may create a quiz (no accounts); Turnstile on **create only**; rate limits on join/answer.
 - **Full exam**: one question per group, in pool order (T1A…T0C), like a printed VE exam. Shows Pass / "Practice".
-- **Custom quiz**: 10 / 20 / other (5 … all in selection), from chosen subelements (all by default),
+- **Custom quiz**: 10 / 20 / other (1 … all in selection), from chosen subelements (all by default),
   random without repeats, random order. Shows score and % only (no pass/fail).
 - **Answer choices keep the official A–D order** (never shuffled — "All of these" / "Both A and B" answers depend on it).
 - The server picks questions once and stores the list; every client renders the same thing.
