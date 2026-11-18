@@ -100,6 +100,15 @@ Decisions below were settled in a design grilling session on 2026-11-17 (Q1–Q4
 - Local dev: `npx wrangler d1 migrations apply popquiz --local`, then `npm run dev` (Vite runs the Worker + local D1)
 - Deploy: `npm run deploy` (build → remote migrations → `wrangler deploy`)
 
+## Abuse protection & cleanup
+
+- Turnstile on **create only** (invisible unless Cloudflare is unsure). Site key: `VITE_TURNSTILE_SITE_KEY`
+  (`.env.production`); secret: `npx wrangler secret put TURNSTILE_SECRET`. Dev uses Cloudflare's always-pass test keys.
+- Rate limits (Workers Rate Limiting binding, per minute): create 10/IP, join 60/IP, answer writes 120/participant,
+  reads 600/IP (generous for a club on one Wi-Fi network). Over the limit → 429 `rate_limited`; the app retries syncs later.
+- Daily cron 04:17 UTC: delete quizzes older than 30 days (participants/answers cascade) and finalise quizzes
+  whose 7-day window ended (also done lazily when such a quiz is viewed).
+
 ## Data (D1)
 
 ```sql
@@ -120,8 +129,8 @@ answers(pid, q_index, choice, answered_at, PRIMARY KEY(pid, q_index))
 3. Worker + D1 + create / join / share ✅
 4. Answer sync ✅
 5. Results + comparisons ✅
-6. Real-device testing
-7. Turnstile + rate limits (join/answer) + cron cleanup
+6. Real-device testing — checklist in `TESTING.md` (needs real phones)
+7. Turnstile + rate limits (join/answer) + cron cleanup ✅ (code; Turnstile widget + secret needed in production)
 
 ## Later (explicitly out of v1)
 

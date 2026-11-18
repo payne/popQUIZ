@@ -8,6 +8,7 @@ import { usePwa } from '../pwa.ts';
 import { navigate } from '../router.ts';
 import { listSessions, type LocalSession } from '../session.ts';
 import { getString, setString } from '../storage.ts';
+import { Turnstile, TURNSTILE_SITE_KEY } from './Turnstile.tsx';
 
 interface HomeProps {
   onCreated: (r: JoinResponse) => void;
@@ -20,6 +21,10 @@ export function Home({ onCreated }: HomeProps) {
   const [name, setName] = useState(() => getString('pq:name') ?? '');
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // "I'm human" token (single use); a new one is requested after each attempt.
+  const [botToken, setBotToken] = useState<string | null>(null);
+  const [botReset, setBotReset] = useState(0);
+  const needBotToken = !!TURNSTILE_SITE_KEY && !botToken;
   const [poolId, setPoolId] = useState<PoolId>(() => (getString('pq:lastPool') as PoolId | null) ?? 'tech');
   const [pool, setPool] = useState<Pool | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -63,17 +68,21 @@ export function Home({ onCreated }: HomeProps) {
 
   const start = async (e: Event) => {
     e.preventDefault();
-    if (!pool || countError || !cleanName || busy) return;
+    if (!pool || countError || !cleanName || busy || needBotToken) return;
     setBusy(true);
     setSubmitError(null);
     try {
+      const turnstileToken = botToken ?? undefined;
       const r = await api.createQuiz(
-        mode === 'full' ? { pool: pool.id, mode: 'full', name: cleanName } : { pool: pool.id, mode: 'custom', count, subelements: subs, name: cleanName },
+        mode === 'full'
+          ? { pool: pool.id, mode: 'full', name: cleanName, turnstileToken }
+          : { pool: pool.id, mode: 'custom', count, subelements: subs, name: cleanName, turnstileToken },
       );
       setString('pq:name', cleanName);
       onCreated(r);
     } catch (err) {
       setSubmitError(err instanceof ApiError ? err.message : 'Could not start the quiz.');
+      setBotReset((n) => n + 1); // the token was used up
     } finally {
       setBusy(false);
     }
@@ -191,9 +200,20 @@ export function Home({ onCreated }: HomeProps) {
       </fieldset>
 
       {countError && <p class="error">{countError}</p>}
+      {pwa.online && <Turnstile onToken={setBotToken} onError={setSubmitError} resetKey={botReset} />}
       {submitError && <p class="error">{submitError}</p>}
-      <button type="submit" class="btn btn-primary btn-big" disabled={!pool || !!countError || !cleanName || busy || !pwa.online}>
-        {busy ? 'Starting…' : pwa.online ? 'Start quiz' : 'Starting a quiz needs a connection'}
+      <button
+        type="submit"
+        class="btn btn-primary btn-big"
+        disabled={!pool || !!countError || !cleanName || busy || !pwa.online || needBotToken}
+      >
+        {busy
+          ? 'Starting…'
+          : !pwa.online
+            ? 'Starting a quiz needs a connection'
+            : needBotToken
+              ? 'Checking you’re human…'
+              : 'Start quiz'}
       </button>
       <p class="muted small center">You'll get a link to share from the ☰ menu.</p>
 

@@ -17,7 +17,7 @@ import type {
   SubmitRequest,
   SubmitResponse,
 } from '../shared/api.ts';
-import { CODE_RE, JOIN_WINDOW_MS, nameKey, normalizeName } from '../shared/api.ts';
+import { CODE_RE, JOIN_WINDOW_MS, RETENTION_MS, nameKey, normalizeName } from '../shared/api.ts';
 import type { Pool, PoolId } from '../shared/pool.ts';
 import { buildQuiz, scoreQuiz, type Answer, type QuizSpec } from '../shared/quiz.ts';
 import { cryptoRng, newCode, newId, sha256Hex } from './crypto.ts';
@@ -27,7 +27,15 @@ import extra from '../../public/pools/extra.json';
 
 export interface Env {
   DB: D1Database;
+  /** Turnstile secret (wrangler secret). When unset, bot checks are skipped — local tests only. */
+  TURNSTILE_SECRET?: string;
+  RL_CREATE?: RateLimit;
+  RL_JOIN?: RateLimit;
+  RL_WRITE?: RateLimit;
+  RL_READ?: RateLimit;
 }
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const POOLS: Record<PoolId, Pool> = {
   tech: tech as unknown as Pool,
@@ -39,7 +47,7 @@ type Ctx = Context<{ Bindings: Env }>;
 
 class ApiError extends Error {
   constructor(
-    readonly status: 400 | 401 | 403 | 404 | 409 | 410 | 500,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 410 | 429 | 500,
     readonly code: ApiErrorCode,
     message: string,
   ) {
@@ -61,6 +69,42 @@ app.onError((err, c) => {
   return c.json({ error: 'Something went wrong', code: 'server_error' }, 500);
 });
 app.notFound((c) => c.json({ error: 'Not found', code: 'not_found' }, 404));
+
+// ---------- rate limits & bot check ----------
+
+const clientIp = (c: Ctx) => c.req.header('CF-Connecting-IP') ?? 'unknown';
+
+async function rateLimit(limiter: RateLimit | undefined, key: string): Promise<void> {
+  if (!limiter) return;
+  const { success } = await limiter.limit({ key });
+  if (!success) throw new ApiError(429, 'rate_limited', 'Too many requests — wait a moment and try again');
+}
+
+// Reads (quiz info, results polling), per client IP.
+app.use('/quizzes/*', async (c, next) => {
+  if (c.req.method === 'GET') await rateLimit(c.env.RL_READ, `ip:${clientIp(c)}`);
+  await next();
+});
+
+/** Verifies a Turnstile token with Cloudflare. Skipped only when no secret is configured (tests). */
+async function verifyTurnstile(c: Ctx, token: unknown): Promise<void> {
+  const secret = c.env.TURNSTILE_SECRET;
+  if (!secret) return;
+  if (typeof token !== 'string' || !token) throw new ApiError(403, 'bot_check', 'Please complete the “I’m human” check');
+  const form = new FormData();
+  form.append('secret', secret);
+  form.append('response', token);
+  const ip = c.req.header('CF-Connecting-IP');
+  if (ip) form.append('remoteip', ip);
+  let ok = false;
+  try {
+    const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: form });
+    ok = ((await r.json()) as { success?: boolean }).success === true;
+  } catch {
+    throw new ApiError(500, 'server_error', 'Could not verify the “I’m human” check — try again');
+  }
+  if (!ok) throw new ApiError(403, 'bot_check', 'The “I’m human” check failed or expired — try again');
+}
 
 // ---------- helpers ----------
 
@@ -116,7 +160,19 @@ async function getQuizRow(db: D1Database, code: string): Promise<QuizRow> {
   return row;
 }
 
+/**
+ * A quiz whose 7-day window ran out without being closed: record it as closed at `closes_at`
+ * and score everyone still working from the answers the server has. Idempotent.
+ */
+async function finalizeExpired(db: D1Database, q: QuizRow, now: number): Promise<QuizRow> {
+  if (q.closed_at !== null || now < q.closes_at) return q;
+  await db.prepare('UPDATE quizzes SET closed_at = ? WHERE code = ? AND closed_at IS NULL').bind(q.closes_at, q.code).run();
+  await finalizeUnfinished(db, q, q.closes_at);
+  return { ...q, closed_at: q.closes_at };
+}
+
 async function quizInfo(db: D1Database, q: QuizRow, now = Date.now()): Promise<QuizInfo> {
+  q = await finalizeExpired(db, q, now);
   const { results } = await db
     .prepare(
       `SELECT p.pid, p.display_name, p.joined_at, p.finished_at,
@@ -154,6 +210,7 @@ async function requireParticipant(c: Ctx, code: string): Promise<{ pid: string; 
     .bind(code, await sha256Hex(token))
     .first<{ pid: string; finished_at: number | null }>();
   if (!row) throw new ApiError(401, 'unauthorized', 'Unknown participant token');
+  await rateLimit(c.env.RL_WRITE, `pid:${row.pid}`);
   return row;
 }
 
@@ -176,6 +233,7 @@ app.get('/health', (c) => c.json({ ok: true }));
 
 /** Create a quiz; the creator joins it in the same request. */
 app.post('/quizzes', async (c) => {
+  await rateLimit(c.env.RL_CREATE, `ip:${clientIp(c)}`);
   const body = await readJson<CreateQuizRequest>(c);
   const name = requireName(body.name);
   const pool = POOLS[body.pool as PoolId];
@@ -201,6 +259,7 @@ app.post('/quizzes', async (c) => {
     throw new ApiError(400, 'bad_request', (e as Error).message);
   }
   if (!spec) throw new ApiError(400, 'bad_request', 'Mode must be "full" or "custom"');
+  await verifyTurnstile(c, body.turnstileToken);
 
   const now = Date.now();
   const pid = newId();
@@ -233,6 +292,7 @@ app.get('/quizzes/:code', async (c) => {
 });
 
 app.post('/quizzes/:code/participants', async (c) => {
+  await rateLimit(c.env.RL_JOIN, `ip:${clientIp(c)}`);
   const code = requireCode(c.req.param('code'));
   const body = await readJson<JoinRequest>(c);
   const name = requireName(body.name);
@@ -334,10 +394,10 @@ app.post('/quizzes/:code/submit', async (c) => {
  */
 app.get('/quizzes/:code/results', async (c) => {
   const code = requireCode(c.req.param('code'));
-  const row = await getQuizRow(c.env.DB, code);
+  const now = Date.now();
+  const row = await finalizeExpired(c.env.DB, await getQuizRow(c.env.DB, code), now);
   const pool = POOLS[row.pool];
   const items = JSON.parse(row.items_json) as string[];
-  const now = Date.now();
 
   const { results: people } = await c.env.DB.prepare(
     `SELECT p.pid, p.display_name, p.joined_at, p.finished_at, p.score,
@@ -449,6 +509,23 @@ async function finalizeUnfinished(db: D1Database, row: QuizRow, now: number, onl
   );
 }
 
+/** Daily cron: delete quizzes older than 30 days; finalise quizzes whose join window ended. */
+export async function dailyCleanup(env: Env, now = Date.now()): Promise<{ deleted: number; finalized: number }> {
+  const del = await env.DB.prepare('DELETE FROM quizzes WHERE created_at < ?').bind(now - RETENTION_MS).run();
+  const { results: expired } = await env.DB.prepare(
+    `SELECT * FROM quizzes WHERE closed_at IS NULL AND closes_at <= ? LIMIT 500`,
+  )
+    .bind(now)
+    .all<QuizRow>();
+  for (const q of expired) await finalizeExpired(env.DB, q, now);
+  return { deleted: del.meta.changes ?? 0, finalized: expired.length };
+}
+
 export default {
   fetch: app.fetch,
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(
+      dailyCleanup(env).then((r) => console.log(`cleanup: deleted ${r.deleted} rows, finalized ${r.finalized} expired quizzes`)),
+    );
+  },
 } satisfies ExportedHandler<Env>;

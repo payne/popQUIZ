@@ -1,10 +1,10 @@
 // API tests against a real local D1 (workerd via wrangler's getPlatformProxy, in-memory, never remote).
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getPlatformProxy } from 'wrangler';
-import { app, isClosed, type Env } from '../src/worker/index.ts';
+import { app, dailyCleanup, isClosed, type Env } from '../src/worker/index.ts';
 import { CODE_RE, normalizeName, nameKey, type JoinResponse, type QuizInfo, type ResultsResponse } from '../src/shared/api.ts';
 import { newCode } from '../src/worker/crypto.ts';
 
@@ -13,7 +13,8 @@ let env: Env;
 
 beforeAll(async () => {
   proxy = await getPlatformProxy<Env>({ persist: false, remoteBindings: false });
-  env = proxy.env;
+  // No bot check or rate limits for the functional tests (they have their own tests below).
+  env = { DB: proxy.env.DB };
   const sql = readFileSync(join(import.meta.dirname, '../migrations/0001_init.sql'), 'utf8')
     .replace(/--.*$/gm, '')
     .split(';')
@@ -26,11 +27,12 @@ afterAll(async () => {
   await proxy?.dispose();
 });
 
-async function call(method: string, path: string, body?: unknown, token?: string) {
+async function call(method: string, path: string, body?: unknown, token?: string, useEnv: Env = env, ip?: string) {
   const headers: Record<string, string> = {};
+  if (ip) headers['CF-Connecting-IP'] = ip;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await app.request(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }, env);
+  const res = await app.request(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }, useEnv);
   return { status: res.status, body: (await res.json()) as any };
 }
 
@@ -265,5 +267,104 @@ describe('results', () => {
 
   it('404s unknown quizzes', async () => {
     expect((await call('GET', '/quizzes/ZZZZZZ/results')).status).toBe(404);
+  });
+});
+
+describe('bot check (Turnstile)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const withSecret = () => ({ DB: env.DB, TURNSTILE_SECRET: 'secret' }) as Env;
+
+  it('requires a token and verifies it with Cloudflare', async () => {
+    const verify = vi.fn(async (_url: string, init?: RequestInit) => {
+      const form = init?.body as FormData;
+      const ok = form.get('response') === 'good' && form.get('secret') === 'secret';
+      return new Response(JSON.stringify({ success: ok }));
+    });
+    vi.stubGlobal('fetch', verify);
+    const req = { pool: 'tech', mode: 'full', name: 'N3PAY' };
+    expect((await call('POST', '/quizzes', req, undefined, withSecret())).body.code).toBe('bot_check');
+    expect((await call('POST', '/quizzes', { ...req, turnstileToken: 'bad' }, undefined, withSecret())).status).toBe(403);
+    const ok = await call('POST', '/quizzes', { ...req, turnstileToken: 'good' }, undefined, withSecret(), '203.0.113.9');
+    expect(ok.status).toBe(201);
+    expect(String(verify.mock.calls.at(-1)![0])).toBe('https://challenges.cloudflare.com/turnstile/v0/siteverify');
+    expect((verify.mock.calls.at(-1)![1]?.body as FormData).get('remoteip')).toBe('203.0.113.9');
+  });
+
+  it('is not needed to join', async () => {
+    const { body: c } = await create();
+    expect((await call('POST', `/quizzes/${c.quiz.code}/participants`, { name: 'Bob' }, undefined, withSecret())).status).toBe(201);
+  });
+});
+
+describe('rate limits', () => {
+  /** A limiter that allows `n` calls per key. */
+  const limiter = (n: number) => {
+    const seen = new Map<string, number>();
+    return {
+      keys: seen,
+      limit: async ({ key }: { key: string }) => {
+        seen.set(key, (seen.get(key) ?? 0) + 1);
+        return { success: seen.get(key)! <= n };
+      },
+    } as unknown as RateLimit & { keys: Map<string, number> };
+  };
+
+  it('limits quiz creation per IP', async () => {
+    const RL_CREATE = limiter(2);
+    const e = { DB: env.DB, RL_CREATE } as Env;
+    const req = { pool: 'tech', mode: 'full', name: 'N3PAY' };
+    expect((await call('POST', '/quizzes', req, undefined, e, '198.51.100.1')).status).toBe(201);
+    expect((await call('POST', '/quizzes', req, undefined, e, '198.51.100.1')).status).toBe(201);
+    const third = await call('POST', '/quizzes', req, undefined, e, '198.51.100.1');
+    expect(third).toMatchObject({ status: 429, body: { code: 'rate_limited' } });
+    expect((await call('POST', '/quizzes', req, undefined, e, '198.51.100.2')).status).toBe(201); // other IP
+  });
+
+  it('limits answer writes per participant and reads per IP', async () => {
+    const { body: c } = await create();
+    const RL_WRITE = limiter(1);
+    const RL_READ = limiter(1);
+    const e = { DB: env.DB, RL_WRITE, RL_READ } as Env;
+    const put = () => call('PUT', `/quizzes/${c.quiz.code}/answers`, { answers: [{ i: 0, choice: 1 }] }, c.token, e);
+    expect((await put()).status).toBe(200);
+    expect((await put()).status).toBe(429);
+    expect([...RL_WRITE.keys.keys()]).toEqual([`pid:${c.pid}`]);
+    expect((await call('GET', `/quizzes/${c.quiz.code}/results`, undefined, undefined, e, '192.0.2.5')).status).toBe(200);
+    expect((await call('GET', `/quizzes/${c.quiz.code}`, undefined, undefined, e, '192.0.2.5')).status).toBe(429);
+  });
+});
+
+describe('expiry and daily cleanup', () => {
+  it('finalises a quiz whose 7 days ran out, scoring people still working', async () => {
+    const { body: c } = await create();
+    const code = c.quiz.code;
+    const { body: bob } = await call('POST', `/quizzes/${code}/participants`, { name: 'Bob' });
+    await call('PUT', `/quizzes/${code}/answers`, { answers: [{ i: 0, choice: 0 }] }, bob.token);
+    // Pretend it was created 8 days ago.
+    const past = Date.now() - 8 * 24 * 3600 * 1000;
+    await env.DB.prepare('UPDATE quizzes SET created_at = ?, closes_at = ? WHERE code = ?').bind(past, past + 7 * 24 * 3600 * 1000, code).run();
+
+    const r = (await call('GET', `/quizzes/${code}/results`)).body as ResultsResponse;
+    expect(r.closed).toBe(true);
+    expect(r.leaderboard.every((x) => x.finished)).toBe(true);
+    const row = await env.DB.prepare('SELECT closed_at, closes_at FROM quizzes WHERE code = ?').bind(code).first<{ closed_at: number; closes_at: number }>();
+    expect(row!.closed_at).toBe(row!.closes_at);
+  });
+
+  it('deletes quizzes older than 30 days with their people and answers', async () => {
+    const { body: old } = await create();
+    const { body: fresh } = await create();
+    await call('PUT', `/quizzes/${old.quiz.code}/answers`, { answers: [{ i: 0, choice: 0 }] }, old.token);
+    const longAgo = Date.now() - 31 * 24 * 3600 * 1000;
+    await env.DB.prepare('UPDATE quizzes SET created_at = ?, closes_at = ? WHERE code = ?').bind(longAgo, longAgo + 7 * 24 * 3600 * 1000, old.quiz.code).run();
+
+    const r = await dailyCleanup(env);
+    expect(r.deleted).toBeGreaterThanOrEqual(1);
+    expect((await call('GET', `/quizzes/${old.quiz.code}`)).status).toBe(404);
+    expect((await call('GET', `/quizzes/${fresh.quiz.code}`)).status).toBe(200);
+    const orphans = await env.DB.prepare('SELECT COUNT(*) AS n FROM participants WHERE pid = ?').bind(old.pid).first<{ n: number }>();
+    expect(orphans!.n).toBe(0);
+    const orphanAnswers = await env.DB.prepare('SELECT COUNT(*) AS n FROM answers WHERE pid = ?').bind(old.pid).first<{ n: number }>();
+    expect(orphanAnswers!.n).toBe(0);
   });
 });

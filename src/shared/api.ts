@@ -21,6 +21,8 @@ export interface CreateQuizRequest {
   subelements?: string[];
   /** The creator's call sign or nickname. */
   name: string;
+  /** Cloudflare Turnstile token from the "I'm human" check. */
+  turnstileToken?: string;
 }
 
 export interface JoinRequest {
@@ -130,6 +132,8 @@ export type ApiErrorCode =
   | 'not_found'
   | 'closed'
   | 'finished'
+  | 'rate_limited'
+  | 'bot_check'
   | 'unauthorized'
   | 'forbidden'
   | 'pool_mismatch'

@@ -1179,3 +1179,12 @@ a.btn {
 .mark .you {
   color: var(--primary);
 }
+
+/* ---------- Step 7: Turnstile ---------- */
+.turnstile:empty {
+  display: none;
+}
+.turnstile {
+  display: flex;
+  justify-content: center;
+}

@@ -17,5 +17,17 @@
       "migrations_dir": "migrations"
     }
   ],
-  "routes": [{ "pattern": "pq.n3pay.net", "custom_domain": true }]
+  "routes": [{ "pattern": "pq.n3pay.net", "custom_domain": true }],
+  // Daily at 04:17 UTC: delete quizzes older than 30 days; score anyone left in a quiz whose 7 days ran out.
+  "triggers": { "crons": ["17 4 * * *"] },
+  // Per-key limits (per Cloudflare location, best effort). Keys: client IP for create/join/read,
+  // participant id for answer writes. Generous enough for a whole club on one Wi-Fi network.
+  "ratelimits": [
+    { "name": "RL_CREATE", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_JOIN", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } },
+    { "name": "RL_WRITE", "namespace_id": "1003", "simple": { "limit": 120, "period": 60 } },
+    { "name": "RL_READ", "namespace_id": "1004", "simple": { "limit": 600, "period": 60 } }
+  ]
+  // Secret (not in this file): TURNSTILE_SECRET — `npx wrangler secret put TURNSTILE_SECRET`.
+  // Local dev reads it from .dev.vars (see .dev.vars.example).
 }
