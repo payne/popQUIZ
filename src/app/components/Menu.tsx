@@ -11,18 +11,33 @@ function applyTheme(t: Theme) {
   setString('pq:theme', t === 'system' ? null : t);
 }
 
+/** Quiz-specific menu items, present while viewing a quiz. */
+export interface QuizMenu {
+  code: string;
+  onShare: () => void;
+  onQr: () => void;
+  onWhosIn: () => void;
+  /** Only for the creator while the quiz is open. */
+  onCloseQuiz?: () => void;
+  participantCount?: number;
+}
+
 interface MenuProps {
   open: boolean;
   onClose: () => void;
-  /** Present when there is something to start over from. */
-  onNewQuiz?: () => void;
-  quizInProgress: boolean;
+  onNewQuiz: () => void;
+  quiz?: QuizMenu;
 }
 
-export function Menu({ open, onClose, onNewQuiz, quizInProgress }: MenuProps) {
+export function Menu({ open, onClose, onNewQuiz, quiz }: MenuProps) {
   const pwa = usePwa();
   const [theme, setTheme] = useState<Theme>(() => (getString('pq:theme') as Theme | null) ?? 'system');
-  const [dialog, setDialog] = useState<null | 'reload' | 'reset' | 'new' | 'ios'>(null);
+  const [dialog, setDialog] = useState<null | 'reload' | 'reset' | 'ios'>(null);
+  /** Run a menu action and close the menu. */
+  const act = (fn: () => void) => () => {
+    onClose();
+    fn();
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -50,14 +65,41 @@ export function Menu({ open, onClose, onNewQuiz, quizInProgress }: MenuProps) {
         </div>
 
         <ul class="menu-list">
-          {onNewQuiz && (
-            <li>
-              <button type="button" onClick={() => (quizInProgress ? setDialog('new') : (onNewQuiz(), onClose()))}>
-                ＋ New quiz
-              </button>
-            </li>
+          {quiz && (
+            <>
+              <li>
+                <button type="button" onClick={act(quiz.onShare)}>
+                  ↗ Share this quiz
+                  <small>Text a friend the link · {quiz.code}</small>
+                </button>
+              </li>
+              <li>
+                <button type="button" onClick={act(quiz.onQr)}>
+                  ▦ QR code
+                  <small>For people in the same room</small>
+                </button>
+              </li>
+              <li>
+                <button type="button" onClick={act(quiz.onWhosIn)}>
+                  👥 Who's in{quiz.participantCount ? ` (${quiz.participantCount})` : ''}
+                </button>
+              </li>
+              {/* Results comparison arrives in step 5. */}
+              {quiz.onCloseQuiz && (
+                <li>
+                  <button type="button" onClick={act(quiz.onCloseQuiz)}>
+                    ⏹ Close quiz
+                    <small>Stop new people joining</small>
+                  </button>
+                </li>
+              )}
+            </>
           )}
-          {/* Share, QR code, Who's in, and Results arrive with shared quizzes (step 3). */}
+          <li>
+            <button type="button" onClick={act(onNewQuiz)}>
+              ＋ New quiz
+            </button>
+          </li>
           {showInstall && (
             <li>
               <button
@@ -123,21 +165,6 @@ export function Menu({ open, onClose, onNewQuiz, quizInProgress }: MenuProps) {
             finished, and reloads the app as if it were your first visit.
           </p>
           <p>This can't be undone.</p>
-        </Confirm>
-      )}
-      {dialog === 'new' && onNewQuiz && (
-        <Confirm
-          title="Start a new quiz?"
-          confirmLabel="Start over"
-          danger
-          onCancel={() => setDialog(null)}
-          onConfirm={() => {
-            setDialog(null);
-            onNewQuiz();
-            onClose();
-          }}
-        >
-          <p>Your current quiz isn't submitted yet. Starting a new one will discard it.</p>
         </Confirm>
       )}
       {dialog === 'ios' && (

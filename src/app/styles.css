@@ -850,3 +850,179 @@ legend {
 .toast .icon-btn:hover {
   background: rgb(255 255 255 / 0.12);
 }
+
+/* ---------- Step 3: sharing, joining ---------- */
+a.brand {
+  color: inherit;
+  text-decoration: none;
+}
+.small {
+  font-size: 0.85rem;
+}
+.h-small {
+  font-size: 1rem;
+}
+.text-input {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 14px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 1.05rem;
+}
+.text-input:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+.tip,
+.notice {
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 0.95rem;
+}
+.notice {
+  border-left: 4px solid var(--flag);
+}
+.notice p {
+  margin: 4px 0 0;
+}
+.code-pill {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  background: var(--surface);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+.people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.people li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  min-height: var(--tap);
+}
+.people li + li {
+  border-top: 1px solid var(--border);
+}
+.person-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.person-status {
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+.person-status.done {
+  color: var(--good);
+  font-weight: 700;
+}
+.share {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+}
+.share-code {
+  margin: 0;
+  font-size: 2.2rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  font-variant-numeric: tabular-nums;
+}
+.share-url {
+  text-align: center;
+  font-size: 0.95rem;
+}
+.share-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+.qr {
+  margin: 0;
+  text-align: center;
+}
+.qr img {
+  display: block;
+  width: min(240px, 60vw);
+  height: auto;
+  background: #fff;
+  border-radius: 8px;
+  image-rendering: pixelated;
+}
+.share.qr-first .qr {
+  order: -1;
+}
+.share.qr-first .qr img {
+  width: min(320px, 75vw);
+}
+.your-quizzes h2 {
+  font-size: 1rem;
+}
+.your-quizzes ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.your-quizzes li + li {
+  border-top: 1px solid var(--border);
+}
+.your-quizzes a {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  min-height: var(--tap);
+  color: inherit;
+  text-decoration: none;
+}
+.your-quizzes a:hover {
+  background: var(--surface-2);
+}
+.yq-code {
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+.yq-what {
+  color: var(--muted);
+  font-size: 0.9rem;
+  min-width: 0;
+}
+.yq-status {
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.yq-status.working {
+  color: var(--flag);
+}

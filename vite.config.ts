@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import preact from '@preact/preset-vite';
+import { cloudflare } from '@cloudflare/vite-plugin';
 import { VitePWA } from 'vite-plugin-pwa';
 import pkg from './package.json' with { type: 'json' };
 
@@ -14,6 +15,8 @@ export default defineConfig({
   build: { outDir: 'dist' },
   plugins: [
     preact(),
+    // Runs the Worker (src/worker) + local D1 inside `vite dev`, and builds it alongside the client.
+    cloudflare(),
     VitePWA({
       // Never reload on its own: the app shows an "Update available" toast instead (PLAN: PWA).
       registerType: 'prompt',

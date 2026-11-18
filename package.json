@@ -5,13 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run typecheck && rm -rf dist && vite build",
     "preview": "vite preview --port 4173 --strictPort",
     "pools": "tsx scripts/parse-pool.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/worker",
+    "deploy": "npm run build && wrangler d1 migrations apply popquiz --remote && wrangler deploy"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.70.0",
+    "@cloudflare/workers-types": "^5.20261118.1",
     "@preact/preset-vite": "^2.10.6",
     "@types/node": "^26.6.6",
     "fflate": "^0.8.3",
@@ -20,9 +23,12 @@
     "vite": "^8.3.8",
     "vite-plugin-pwa": "^2.0.0",
     "vitest": "^5.1.0",
-    "workbox-window": "^7.4.1"
+    "workbox-window": "^7.4.1",
+    "wrangler": "^4.164.0"
   },
   "dependencies": {
-    "preact": "^11.2.0"
+    "hono": "^4.13.19",
+    "preact": "^11.2.0",
+    "uqr": "^0.1.3"
   }
 }

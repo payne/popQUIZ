@@ -40,6 +40,7 @@ export function Results({ pool, session, onNewQuiz }: ResultsProps) {
           {score.answered < score.total && ` · ${score.total - score.answered} left blank`}
           {spec.mode === 'full' && ` · Pass mark ${pool.passing}/${pool.examSize}`}
         </p>
+        {session.autoSubmitted && <p class="muted small">The quiz was closed, so your answers were submitted automatically.</p>}
         <button type="button" class="btn btn-primary" onClick={onNewQuiz}>
           New quiz
         </button>

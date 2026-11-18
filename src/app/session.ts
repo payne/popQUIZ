@@ -1,39 +1,77 @@
-// The person's local quiz session, saved to localStorage on every change.
-// Step 3 will key sessions by quiz code (pq:<CODE>) and add a server sync queue.
+// A person's local copy of one quiz, saved to localStorage under "pq:quiz:<CODE>" on every change.
+// It holds the participant token (their identity for that quiz), the question list, and their answers,
+// so a started quiz keeps working offline. Step 4 adds syncing answers to the server.
 
+import type { JoinResponse } from '../shared/api.ts';
 import type { Answer, QuizSpec } from '../shared/quiz.ts';
 import { getJSON, setJSON, setString } from './storage.ts';
 
 export interface LocalSession {
+  code: string;
+  pid: string;
+  token: string;
+  name: string;
+  creator: boolean;
   spec: QuizSpec;
   answers: Answer[];
   flags: boolean[];
   current: number;
   startedAt: number;
   submittedAt?: number;
+  /** Submitted because the quiz closed, not by the person. */
+  autoSubmitted?: boolean;
 }
 
-const KEY = 'pq:local';
+const PREFIX = 'pq:quiz:';
+const key = (code: string) => PREFIX + code;
 
-export function newSession(spec: QuizSpec): LocalSession {
+export function sessionFromJoin(r: JoinResponse): LocalSession {
+  const q = r.quiz;
   return {
-    spec,
-    answers: spec.items.map(() => null),
-    flags: spec.items.map(() => false),
+    code: q.code,
+    pid: r.pid,
+    token: r.token,
+    name: r.name,
+    creator: q.creatorPid === r.pid,
+    spec: { pool: q.pool, poolVersion: q.poolVersion, mode: q.mode, items: q.items },
+    answers: q.items.map(() => null),
+    flags: q.items.map(() => false),
     current: 0,
     startedAt: Date.now(),
   };
 }
 
-export function loadSession(): LocalSession | null {
-  const s = getJSON<LocalSession>(KEY);
-  if (!s || !Array.isArray(s.spec?.items) || !Array.isArray(s.answers)) return null;
-  return s;
+function valid(s: LocalSession | null): s is LocalSession {
+  return !!s && typeof s.code === 'string' && typeof s.token === 'string' && Array.isArray(s.spec?.items) && Array.isArray(s.answers);
 }
 
-export function saveSession(s: LocalSession | null): void {
-  if (s) setJSON(KEY, s);
-  else setString(KEY, null);
+export function loadSession(code: string): LocalSession | null {
+  const s = getJSON<LocalSession>(key(code));
+  return valid(s) ? s : null;
+}
+
+export function saveSession(s: LocalSession): void {
+  setJSON(key(s.code), s);
+}
+
+/** Every quiz this browser has joined, newest first. */
+export function listSessions(): LocalSession[] {
+  const out: LocalSession[] = [];
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (!k.startsWith(PREFIX)) continue;
+      const s = getJSON<LocalSession>(k);
+      if (valid(s)) out.push(s);
+    }
+  } catch {
+    /* storage unavailable */
+  }
+  return out.sort((a, b) => b.startedAt - a.startedAt);
+}
+
+/** Step 2 kept a single unshared quiz under "pq:local"; quizzes now always live on the server. */
+export function dropLegacySession(): void {
+  setString('pq:local', null);
 }
 
 export function formatDuration(ms: number): string {

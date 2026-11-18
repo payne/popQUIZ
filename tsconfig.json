@@ -14,5 +14,6 @@
     "allowImportingTsExtensions": true,
     "types": ["node", "vite/client", "vite-plugin-pwa/vanillajs"]
   },
-  "include": ["src", "scripts", "test", "vite.config.ts"]
+  "include": ["src", "scripts", "test", "vite.config.ts"],
+  "exclude": ["src/worker", "test/api.test.ts"]
 }

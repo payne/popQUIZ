@@ -43,7 +43,7 @@ Decisions below were settled in a design grilling session on 2026-11-17 (Q1–Q4
 - Change answers, skip, and flag-for-review before submitting. Submitting with blanks warns first; blanks count wrong.
 - The **creator is always a participant**, plus they can close the quiz.
 - Names: free text 1–20 chars (call sign or nickname), no call sign validation; **duplicates in a quiz rejected (case-insensitive)**.
-- Identity = random participant token in localStorage (`pq:<CODE>`). **One browser per person** (no cross-device resume in v1).
+- Identity = random participant token (only its SHA-256 is stored in D1), kept in localStorage under `pq:quiz:<CODE>`. **One browser per person** (no cross-device resume in v1).
 - Answers write to localStorage first, then sync to the server; unsent answers queue and retry.
 
 ## Lifetime
@@ -82,6 +82,15 @@ Decisions below were settled in a design grilling session on 2026-11-17 (Q1–Q4
 
 - Mobile-first, CSS Grid + `clamp()` type, ≥ 44 px tap targets. One column on phones; question navigator beside the question on tablet/desktop.
 
+## API (Worker, `/api/*`)
+
+- `POST /api/quizzes` `{pool, mode, count?, subelements?, name}` → `{pid, token, name, quiz}` (creator joins in the same call)
+- `GET /api/quizzes/:code` → quiz info: items, closed?, participants (names, finished)
+- `POST /api/quizzes/:code/participants` `{name}` → `{pid, token, name, quiz}`; 409 `name_taken`, 410 `closed`
+- `POST /api/quizzes/:code/close` (Bearer token, creator only) → closes and marks everyone finished
+- Local dev: `npx wrangler d1 migrations apply popquiz --local`, then `npm run dev` (Vite runs the Worker + local D1)
+- Deploy: `npm run deploy` (build → remote migrations → `wrangler deploy`)
+
 ## Data (D1)
 
 ```sql
@@ -99,11 +108,11 @@ answers(pid, q_index, choice, answered_at, PRIMARY KEY(pid, q_index))
 
 1. Pool parser → JSON for all three exams ✅
 2. Single-person local quiz **+ PWA setup** ✅
-3. Worker + D1 + create / join / share
+3. Worker + D1 + create / join / share ✅
 4. Answer sync
 5. Results + comparisons
 6. Real-device testing
-7. Turnstile + cron cleanup
+7. Turnstile + rate limits (join/answer) + cron cleanup
 
 ## Later (explicitly out of v1)
 

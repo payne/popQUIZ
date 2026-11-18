@@ -1,16 +1,25 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { Pool, PoolId } from '../../shared/pool.ts';
-import { buildQuiz, CUSTOM_PRESETS, customRange, type QuizSpec } from '../../shared/quiz.ts';
+import { NAME_MAX, normalizeName, type JoinResponse } from '../../shared/api.ts';
+import { CUSTOM_PRESETS, customRange, scoreQuiz } from '../../shared/quiz.ts';
+import { api, ApiError } from '../api.ts';
 import { loadPool, POOL_CHOICES } from '../pools.ts';
+import { usePwa } from '../pwa.ts';
+import { navigate } from '../router.ts';
+import { listSessions, type LocalSession } from '../session.ts';
 import { getString, setString } from '../storage.ts';
 
 interface HomeProps {
-  onStart: (spec: QuizSpec) => void;
+  onCreated: (r: JoinResponse) => void;
 }
 
 type CountChoice = (typeof CUSTOM_PRESETS)[number] | 'other';
 
-export function Home({ onStart }: HomeProps) {
+export function Home({ onCreated }: HomeProps) {
+  const pwa = usePwa();
+  const [name, setName] = useState(() => getString('pq:name') ?? '');
+  const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [poolId, setPoolId] = useState<PoolId>(() => (getString('pq:lastPool') as PoolId | null) ?? 'tech');
   const [pool, setPool] = useState<Pool | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -50,10 +59,24 @@ export function Home({ onStart }: HomeProps) {
   const subCount = (id: string) => pool?.questions.filter((q) => q.group.startsWith(id)).length ?? 0;
   const toggleSub = (id: string) => setSubs((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
-  const start = (e: Event) => {
+  const cleanName = normalizeName(name);
+
+  const start = async (e: Event) => {
     e.preventDefault();
-    if (!pool || countError) return;
-    onStart(buildQuiz(pool, mode === 'full' ? { mode: 'full' } : { mode: 'custom', count, subelements: subs }));
+    if (!pool || countError || !cleanName || busy) return;
+    setBusy(true);
+    setSubmitError(null);
+    try {
+      const r = await api.createQuiz(
+        mode === 'full' ? { pool: pool.id, mode: 'full', name: cleanName } : { pool: pool.id, mode: 'custom', count, subelements: subs, name: cleanName },
+      );
+      setString('pq:name', cleanName);
+      onCreated(r);
+    } catch (err) {
+      setSubmitError(err instanceof ApiError ? err.message : 'Could not start the quiz.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -150,14 +173,83 @@ export function Home({ onStart }: HomeProps) {
         {loadError && <p class="error">{loadError}</p>}
       </fieldset>
 
+      <fieldset>
+        <legend>
+          <label for="name">Your call sign or nickname</label>
+        </legend>
+        <input
+          id="name"
+          class="text-input"
+          autoComplete="nickname"
+          autoCapitalize="characters"
+          maxLength={NAME_MAX}
+          placeholder="e.g. KC1ABC or Sam"
+          value={name}
+          onInput={(e) => setName((e.currentTarget as HTMLInputElement).value)}
+        />
+        <p class="muted small">Shown to everyone in the quiz.</p>
+      </fieldset>
+
       {countError && <p class="error">{countError}</p>}
-      <button type="submit" class="btn btn-primary btn-big" disabled={!pool || !!countError}>
-        Start
+      {submitError && <p class="error">{submitError}</p>}
+      <button type="submit" class="btn btn-primary btn-big" disabled={!pool || !!countError || !cleanName || busy || !pwa.online}>
+        {busy ? 'Starting…' : pwa.online ? 'Start quiz' : 'Starting a quiz needs a connection'}
       </button>
+      <p class="muted small center">You'll get a link to share from the ☰ menu.</p>
+
+      <YourQuizzes />
 
       <p class="fineprint">
         Questions from the official NCVEC public-domain question pools. Names and answers are stored for 30 days, then deleted.
       </p>
     </form>
   );
+}
+
+/** Quizzes this browser has joined, so people can get back to them. */
+function YourQuizzes() {
+  const [sessions] = useState<LocalSession[]>(listSessions);
+  if (sessions.length === 0) return null;
+  return (
+    <section class="your-quizzes">
+      <h2>Your quizzes</h2>
+      <ul>
+        {sessions.slice(0, 10).map((s) => (
+          <li>
+            <a
+              href={`/${s.code}`}
+              onClick={(e) => {
+                e.preventDefault();
+                navigate(`/${s.code}`);
+              }}
+            >
+              <span class="yq-code">{s.code}</span>
+              <span class="yq-what">
+                {POOL_CHOICES.find((p) => p.id === s.spec.pool)?.name} · {s.spec.mode === 'full' ? 'Full exam' : `${s.spec.items.length} questions`}
+              </span>
+              <SessionStatus s={s} />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function SessionStatus({ s }: { s: LocalSession }) {
+  const [score, setScore] = useState<string | null>(null);
+  useEffect(() => {
+    if (!s.submittedAt) return;
+    loadPool(s.spec.pool)
+      .then((p) => {
+        const r = scoreQuiz(p, s.spec, s.answers);
+        setScore(`${r.correct}/${r.total}`);
+      })
+      .catch(() => {});
+  }, [s]);
+  if (!s.submittedAt) {
+    const n = s.answers.filter((a) => a !== null).length;
+    return <span class="yq-status working">In progress · {n}/{s.spec.items.length}</span>;
+  }
+  return <span class="yq-status">Done{score ? ` · ${score}` : ''}</span>;
 }

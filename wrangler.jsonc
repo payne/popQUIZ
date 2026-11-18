@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "popquiz",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+  "assets": {
+    // SPA: /K7XM2P etc. serve index.html; /api/* always goes to the Worker.
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "popquiz",
+      "database_id": "05be3d02-d67a-4341-afa8-f532f682bee5",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "routes": [{ "pattern": "pq.n3pay.net", "custom_domain": true }]
+}
