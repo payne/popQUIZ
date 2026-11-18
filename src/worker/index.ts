@@ -3,10 +3,20 @@
 
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import type { CreateQuizRequest, JoinRequest, JoinResponse, ApiErrorCode, QuizInfo } from '../shared/api.ts';
+import type {
+  AnswersRequest,
+  AnswersResponse,
+  ApiErrorCode,
+  CreateQuizRequest,
+  JoinRequest,
+  JoinResponse,
+  QuizInfo,
+  SubmitRequest,
+  SubmitResponse,
+} from '../shared/api.ts';
 import { CODE_RE, JOIN_WINDOW_MS, nameKey, normalizeName } from '../shared/api.ts';
 import type { Pool, PoolId } from '../shared/pool.ts';
-import { buildQuiz } from '../shared/quiz.ts';
+import { buildQuiz, scoreQuiz, type Answer, type QuizSpec } from '../shared/quiz.ts';
 import { cryptoRng, newCode, newId, sha256Hex } from './crypto.ts';
 import tech from '../../public/pools/tech.json';
 import general from '../../public/pools/general.json';
@@ -90,6 +100,7 @@ interface ParticipantRow {
   display_name: string;
   joined_at: number;
   finished_at: number | null;
+  answered: number;
 }
 
 export function isClosed(q: Pick<QuizRow, 'closes_at' | 'closed_at'>, now: number): boolean {
@@ -104,7 +115,11 @@ async function getQuizRow(db: D1Database, code: string): Promise<QuizRow> {
 
 async function quizInfo(db: D1Database, q: QuizRow, now = Date.now()): Promise<QuizInfo> {
   const { results } = await db
-    .prepare('SELECT pid, display_name, joined_at, finished_at FROM participants WHERE code = ? ORDER BY joined_at')
+    .prepare(
+      `SELECT p.pid, p.display_name, p.joined_at, p.finished_at,
+              (SELECT COUNT(*) FROM answers a WHERE a.pid = p.pid) AS answered
+         FROM participants p WHERE p.code = ? ORDER BY p.joined_at`,
+    )
     .bind(q.code)
     .all<ParticipantRow>();
   return {
@@ -123,17 +138,18 @@ async function quizInfo(db: D1Database, q: QuizRow, now = Date.now()): Promise<Q
       name: p.display_name,
       joinedAt: p.joined_at,
       finished: p.finished_at !== null,
+      answered: p.answered,
     })),
   };
 }
 
 /** Resolves the bearer token to a participant of this quiz. */
-async function requireParticipant(c: Ctx, code: string): Promise<{ pid: string }> {
+async function requireParticipant(c: Ctx, code: string): Promise<{ pid: string; finished_at: number | null }> {
   const token = c.req.header('Authorization')?.match(/^Bearer (\S+)$/)?.[1];
   if (!token) throw new ApiError(401, 'unauthorized', 'Missing participant token');
-  const row = await c.env.DB.prepare('SELECT pid FROM participants WHERE code = ? AND token_hash = ?')
+  const row = await c.env.DB.prepare('SELECT pid, finished_at FROM participants WHERE code = ? AND token_hash = ?')
     .bind(code, await sha256Hex(token))
-    .first<{ pid: string }>();
+    .first<{ pid: string; finished_at: number | null }>();
   if (!row) throw new ApiError(401, 'unauthorized', 'Unknown participant token');
   return row;
 }
@@ -241,13 +257,114 @@ app.post('/quizzes/:code/close', async (c) => {
   if (row.creator_pid !== pid) throw new ApiError(403, 'forbidden', 'Only the person who started this quiz can close it');
   const now = Date.now();
   if (row.closed_at === null) {
-    await c.env.DB.batch([
-      c.env.DB.prepare('UPDATE quizzes SET closed_at = ? WHERE code = ? AND closed_at IS NULL').bind(now, code),
-      c.env.DB.prepare('UPDATE participants SET finished_at = ? WHERE code = ? AND finished_at IS NULL').bind(now, code),
-    ]);
+    await c.env.DB.prepare('UPDATE quizzes SET closed_at = ? WHERE code = ? AND closed_at IS NULL').bind(now, code).run();
+    await finalizeUnfinished(c.env.DB, row, now);
   }
   return c.json(await quizInfo(c.env.DB, await getQuizRow(c.env.DB, code), now));
 });
+
+/** Save answers changed since the last sync. Rejected once the person has submitted or the quiz has closed. */
+app.put('/quizzes/:code/answers', async (c) => {
+  const code = requireCode(c.req.param('code'));
+  const me = await requireParticipant(c, code);
+  const body = await readJson<AnswersRequest>(c);
+  const row = await getQuizRow(c.env.DB, code);
+  const now = Date.now();
+  if (me.finished_at !== null) throw new ApiError(409, 'finished', 'Your answers were already submitted');
+  if (isClosed(row, now)) throw new ApiError(410, 'closed', 'This quiz is closed');
+
+  const total = (JSON.parse(row.items_json) as string[]).length;
+  const answers = Array.isArray(body.answers) ? body.answers : null;
+  if (!answers || answers.length === 0 || answers.length > total) throw new ApiError(400, 'bad_request', 'Expected 1 or more answers');
+  for (const a of answers) {
+    if (!a || !Number.isInteger(a.i) || a.i < 0 || a.i >= total || !Number.isInteger(a.choice) || a.choice < 0 || a.choice > 3) {
+      throw new ApiError(400, 'bad_request', 'Each answer needs a question index and a choice 0–3');
+    }
+  }
+  await c.env.DB.batch(answers.map((a) => upsertAnswer(c.env.DB, me.pid, a.i, a.choice, now)));
+  return c.json({ saved: answers.length } satisfies AnswersResponse);
+});
+
+/**
+ * Final submit with the full answer list. Idempotent: if the person was already finalised
+ * (submitted before, or the quiz closed), their recorded score is returned and nothing changes.
+ * After the quiz has closed, only answers that reached the server before closing count.
+ */
+app.post('/quizzes/:code/submit', async (c) => {
+  const code = requireCode(c.req.param('code'));
+  const me = await requireParticipant(c, code);
+  const body = await readJson<SubmitRequest>(c);
+  const row = await getQuizRow(c.env.DB, code);
+  const items = JSON.parse(row.items_json) as string[];
+  const now = Date.now();
+
+  if (me.finished_at === null && !isClosed(row, now)) {
+    const answers = body.answers;
+    if (!Array.isArray(answers) || answers.length !== items.length) {
+      throw new ApiError(400, 'bad_request', `Expected ${items.length} answers (null for blanks)`);
+    }
+    const writes = [];
+    for (let i = 0; i < answers.length; i++) {
+      const a = answers[i];
+      if (a === null) continue;
+      if (!Number.isInteger(a) || (a as number) < 0 || (a as number) > 3) throw new ApiError(400, 'bad_request', 'Answers must be 0–3 or null');
+      writes.push(upsertAnswer(c.env.DB, me.pid, i, a as number, now));
+    }
+    if (writes.length) await c.env.DB.batch(writes);
+  }
+  if (me.finished_at === null) await finalizeUnfinished(c.env.DB, row, now, me.pid);
+
+  const p = await c.env.DB.prepare('SELECT finished_at, score FROM participants WHERE pid = ?')
+    .bind(me.pid)
+    .first<{ finished_at: number; score: number | null }>();
+  return c.json({
+    score: p?.score ?? 0,
+    total: items.length,
+    finishedAt: p?.finished_at ?? now,
+    alreadyFinished: me.finished_at !== null,
+  } satisfies SubmitResponse);
+});
+
+function upsertAnswer(db: D1Database, pid: string, i: number, choice: number, now: number) {
+  return db
+    .prepare(
+      `INSERT INTO answers (pid, q_index, choice, answered_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (pid, q_index) DO UPDATE SET choice = excluded.choice, answered_at = excluded.answered_at`,
+    )
+    .bind(pid, i, choice, now);
+}
+
+/** Scores and marks finished every unfinished participant (or just `onlyPid`) from the answers the server has. */
+async function finalizeUnfinished(db: D1Database, row: QuizRow, now: number, onlyPid?: string): Promise<void> {
+  const pool = POOLS[row.pool];
+  const spec: QuizSpec = { pool: row.pool, poolVersion: row.pool_version, mode: row.mode, items: JSON.parse(row.items_json) };
+  const people = onlyPid
+    ? [{ pid: onlyPid }]
+    : (await db.prepare('SELECT pid FROM participants WHERE code = ? AND finished_at IS NULL').bind(row.code).all<{ pid: string }>())
+        .results;
+  if (people.length === 0) return;
+
+  const { results } = await db
+    .prepare(
+      `SELECT a.pid, a.q_index, a.choice FROM answers a JOIN participants p ON p.pid = a.pid
+        WHERE p.code = ? AND p.finished_at IS NULL`,
+    )
+    .bind(row.code)
+    .all<{ pid: string; q_index: number; choice: number }>();
+  const byPid = new Map<string, Answer[]>();
+  for (const r of results) {
+    const list = byPid.get(r.pid) ?? spec.items.map(() => null);
+    list[r.q_index] = r.choice;
+    byPid.set(r.pid, list);
+  }
+  await db.batch(
+    people.map(({ pid }) =>
+      db
+        .prepare('UPDATE participants SET finished_at = ?, score = ? WHERE pid = ? AND finished_at IS NULL')
+        .bind(now, scoreQuiz(pool, spec, byPid.get(pid) ?? []).correct, pid),
+    ),
+  );
+}
 
 export default {
   fetch: app.fetch,

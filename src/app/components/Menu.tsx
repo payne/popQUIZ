@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { getString, setString } from '../storage.ts';
 import { isIOS, promptInstall, reloadApp, resetEverything, usePwa } from '../pwa.ts';
+import { flushAll } from '../sync.ts';
 import { Confirm, Modal } from './Modal.tsx';
 
 type Theme = 'system' | 'light' | 'dark';
@@ -141,17 +142,7 @@ export function Menu({ open, onClose, onNewQuiz, quiz }: MenuProps) {
         </p>
       </nav>
 
-      {dialog === 'reload' && (
-        <Confirm
-          title="Reload app?"
-          confirmLabel="Reload"
-          onCancel={() => setDialog(null)}
-          onConfirm={() => void reloadApp()}
-        >
-          <p>This clears the app's saved files and downloads the latest version.</p>
-          <p>Your quiz progress stays on this device.</p>
-        </Confirm>
-      )}
+      {dialog === 'reload' && <ReloadDialog onCancel={() => setDialog(null)} />}
       {dialog === 'reset' && (
         <Confirm
           title="Reset everything?"
@@ -192,5 +183,36 @@ export function Menu({ open, onClose, onNewQuiz, quiz }: MenuProps) {
         </Modal>
       )}
     </>
+  );
+}
+
+/** "Reload app": first tries to send unsent answers; warns if some can't be sent (they stay on the device). */
+function ReloadDialog({ onCancel }: { onCancel: () => void }) {
+  const [phase, setPhase] = useState<'ask' | 'flushing' | 'warn'>('ask');
+  const [remaining, setRemaining] = useState(0);
+  const confirm = async () => {
+    if (phase === 'warn') return void reloadApp();
+    setPhase('flushing');
+    const left = await flushAll();
+    if (left === 0) return void reloadApp();
+    setRemaining(left);
+    setPhase('warn');
+  };
+  return (
+    <Confirm
+      title="Reload app?"
+      confirmLabel={phase === 'warn' ? 'Reload anyway' : phase === 'flushing' ? 'Sending answers…' : 'Reload'}
+      onCancel={onCancel}
+      onConfirm={() => void confirm()}
+    >
+      <p>This clears the app's saved files and downloads the latest version.</p>
+      <p>Your quiz progress stays on this device.</p>
+      {phase === 'warn' && (
+        <p class="error">
+          {remaining} {remaining === 1 ? "answer hasn't" : "answers haven't"} reached the server yet. They're saved on this
+          device and will sync after the reload.
+        </p>
+      )}
+    </Confirm>
   );
 }

@@ -14,6 +14,7 @@ import { loadPool, POOL_CHOICES } from './pools.ts';
 import { applyUpdate, dismissUpdate, usePwa } from './pwa.ts';
 import { codeFromPath, navigate, usePath } from './router.ts';
 import { dropLegacySession, loadSession, saveSession, sessionFromJoin, type LocalSession } from './session.ts';
+import { flushAll, unsentCount, useAnswerSync } from './sync.ts';
 
 dropLegacySession();
 
@@ -40,6 +41,14 @@ export function App() {
   }, [session]);
   // Functional updates so rapid taps/keys never overwrite each other with a stale session.
   const patch = useCallback((fn: (s: LocalSession) => LocalSession) => setSession((prev) => (prev ? fn(prev) : prev)), []);
+
+  // ----- send answers to the server (localStorage first, then sync) -----
+  const syncStatus = useAnswerSync(session, patch, pwa.online);
+  const unsent = session ? unsentCount(session) : 0;
+  // At startup, also flush other quizzes that still have unsent answers.
+  useEffect(() => {
+    if (pwa.online) void flushAll(code ?? undefined);
+  }, [pwa.online]);
 
   // ----- server view of the quiz (who's in, closed?) -----
   const [info, setInfo] = useState<QuizInfo | null>(null);
@@ -133,9 +142,9 @@ export function App() {
     ) : !ready ? (
       <p class="muted center">Loading…</p>
     ) : session.submittedAt ? (
-      <Results pool={ready} session={session} onNewQuiz={() => navigate('/')} />
+      <Results pool={ready} session={session} onNewQuiz={() => navigate('/')} syncStatus={syncStatus} />
     ) : (
-      <QuizView pool={ready} session={session} onChange={patch} onSubmit={submit} />
+      <QuizView pool={ready} session={session} onChange={patch} onSubmit={submit} syncStatus={syncStatus} unsent={unsent} />
     );
   } else if (info) {
     content = <Join info={info} onJoined={joined} />;

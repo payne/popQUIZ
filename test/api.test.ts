@@ -143,3 +143,71 @@ describe('names and codes', () => {
     for (let i = 0; i < 200; i++) expect(newCode()).toMatch(CODE_RE);
   });
 });
+
+describe('answers and submit', () => {
+  const pool = JSON.parse(readFileSync(join(import.meta.dirname, '../public/pools/tech.json'), 'utf8')) as {
+    questions: { id: string; c: number }[];
+  };
+  const keyFor = (items: string[]) => items.map((id) => pool.questions.find((q) => q.id === id)!.c);
+
+  it('saves answers, reports progress, and scores on submit', async () => {
+    const { body: c } = await create();
+    const code = c.quiz.code;
+    const key = keyFor(c.quiz.items);
+
+    // Sync three answers (two right, one wrong), then change one.
+    const r1 = await call('PUT', `/quizzes/${code}/answers`, { answers: [{ i: 0, choice: key[0] }, { i: 1, choice: key[1] }, { i: 2, choice: (key[2]! + 1) % 4 }] }, c.token);
+    expect(r1).toMatchObject({ status: 200, body: { saved: 3 } });
+    await call('PUT', `/quizzes/${code}/answers`, { answers: [{ i: 2, choice: key[2] }] }, c.token);
+
+    const info = await call('GET', `/quizzes/${code}`);
+    expect(info.body.participants[0]).toMatchObject({ answered: 3, finished: false });
+
+    // Final submit with the full list: 30 correct, 5 blank.
+    const final = key.map((k, i) => (i < 30 ? k : null));
+    const sub = await call('POST', `/quizzes/${code}/submit`, { answers: final }, c.token);
+    expect(sub.body).toMatchObject({ score: 30, total: 35, alreadyFinished: false });
+
+    // Submitting again changes nothing; further answers are rejected.
+    const again = await call('POST', `/quizzes/${code}/submit`, { answers: key }, c.token);
+    expect(again.body).toMatchObject({ score: 30, alreadyFinished: true });
+    const late = await call('PUT', `/quizzes/${code}/answers`, { answers: [{ i: 34, choice: key[34] }] }, c.token);
+    expect(late).toMatchObject({ status: 409, body: { code: 'finished' } });
+  });
+
+  it('validates answers', async () => {
+    const { body: c } = await create();
+    const code = c.quiz.code;
+    const bad = (answers: unknown) => call('PUT', `/quizzes/${code}/answers`, { answers }, c.token);
+    expect((await bad([{ i: 35, choice: 0 }])).status).toBe(400);
+    expect((await bad([{ i: 0, choice: 4 }])).status).toBe(400);
+    expect((await bad([{ i: -1, choice: 0 }])).status).toBe(400);
+    expect((await bad([])).status).toBe(400);
+    expect((await call('PUT', `/quizzes/${code}/answers`, { answers: [{ i: 0, choice: 0 }] })).status).toBe(401);
+    expect((await call('POST', `/quizzes/${code}/submit`, { answers: [0] }, c.token)).status).toBe(400);
+  });
+
+  it('closing scores everyone from the answers that reached the server', async () => {
+    const { body: c } = await create();
+    const code = c.quiz.code;
+    const key = keyFor(c.quiz.items);
+    const { body: bob } = await call('POST', `/quizzes/${code}/participants`, { name: 'Bob' });
+    await call('PUT', `/quizzes/${code}/answers`, { answers: [0, 1, 2, 3].map((i) => ({ i, choice: key[i] })) }, bob.token);
+
+    await call('POST', `/quizzes/${code}/close`, undefined, c.token);
+
+    // Bob's late answers are refused; his submit returns the score from what was synced (4).
+    expect((await call('PUT', `/quizzes/${code}/answers`, { answers: [{ i: 5, choice: key[5] }] }, bob.token)).status).toBe(409);
+    const sub = await call('POST', `/quizzes/${code}/submit`, { answers: key }, bob.token);
+    expect(sub.body).toMatchObject({ score: 4, alreadyFinished: true });
+    const mine = await call('POST', `/quizzes/${code}/submit`, { answers: key }, c.token);
+    expect(mine.body).toMatchObject({ score: 0, alreadyFinished: true });
+  });
+
+  it("can't write to another participant's answers", async () => {
+    const { body: a } = await create();
+    const { body: b } = await create();
+    const r = await call('PUT', `/quizzes/${a.quiz.code}/answers`, { answers: [{ i: 0, choice: 0 }] }, b.token);
+    expect(r.status).toBe(401);
+  });
+});

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Pool } from '../../shared/pool.ts';
 import { questionMap } from '../../shared/quiz.ts';
 import type { LocalSession } from '../session.ts';
+import type { SyncStatus } from '../sync.ts';
 import { Confirm, Modal } from './Modal.tsx';
 
 interface QuizViewProps {
@@ -10,11 +11,14 @@ interface QuizViewProps {
   /** Applies a change to the latest session (functional update). */
   onChange: (fn: (s: LocalSession) => LocalSession) => void;
   onSubmit: () => void;
+  syncStatus: SyncStatus;
+  /** Answers saved on this device but not yet on the server. */
+  unsent: number;
 }
 
 const LETTERS = ['A', 'B', 'C', 'D'] as const;
 
-export function QuizView({ pool, session, onChange, onSubmit }: QuizViewProps) {
+export function QuizView({ pool, session, onChange, onSubmit, syncStatus, unsent }: QuizViewProps) {
   const { spec, answers, flags, current } = session;
   const total = spec.items.length;
   const q = questionMap(pool).get(spec.items[current]!);
@@ -113,6 +117,7 @@ export function QuizView({ pool, session, onChange, onSubmit }: QuizViewProps) {
             Q {current + 1} <span class="muted">of {total}</span>
           </span>
           <span class="muted qid">{q.id}</span>
+          <SyncBadge status={syncStatus} unsent={unsent} />
           <button type="button" class="link nav-toggle" aria-expanded={navOpen} onClick={() => setNavOpen((o) => !o)}>
             {answered}/{total} answered ▾
           </button>
@@ -201,5 +206,27 @@ export function QuizView({ pool, session, onChange, onSubmit }: QuizViewProps) {
         </Modal>
       )}
     </div>
+  );
+}
+
+function SyncBadge({ status, unsent }: { status: SyncStatus; unsent: number }) {
+  const label =
+    status === 'saved'
+      ? '✓ Saved'
+      : status === 'saving'
+        ? 'Saving…'
+        : status === 'waiting'
+          ? `${unsent} saved on this device`
+          : 'Not syncing';
+  const title =
+    status === 'waiting'
+      ? 'No connection — your answers are safe on this device and will be sent when you reconnect.'
+      : status === 'stopped'
+        ? 'The server can no longer accept answers for this quiz. Your answers stay on this device.'
+        : 'Your answers are saved.';
+  return (
+    <span class={`sync sync-${status}`} title={title} role="status">
+      {label}
+    </span>
   );
 }

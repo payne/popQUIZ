@@ -1,6 +1,6 @@
 // A person's local copy of one quiz, saved to localStorage under "pq:quiz:<CODE>" on every change.
 // It holds the participant token (their identity for that quiz), the question list, and their answers,
-// so a started quiz keeps working offline. Step 4 adds syncing answers to the server.
+// so a started quiz keeps working offline. `synced` mirrors what the server has; sync.ts sends the difference.
 
 import type { JoinResponse } from '../shared/api.ts';
 import type { Answer, QuizSpec } from '../shared/quiz.ts';
@@ -14,12 +14,19 @@ export interface LocalSession {
   creator: boolean;
   spec: QuizSpec;
   answers: Answer[];
+  /** What the server has confirmed for each question (null = nothing yet). */
+  synced: Answer[];
   flags: boolean[];
   current: number;
   startedAt: number;
   submittedAt?: number;
   /** Submitted because the quiz closed, not by the person. */
   autoSubmitted?: boolean;
+  /** The server has recorded the final submit (and its score). */
+  submitSynced?: boolean;
+  serverScore?: number;
+  /** Set when the server can no longer accept anything for this session (quiz deleted, token unknown). */
+  syncStopped?: string;
 }
 
 const PREFIX = 'pq:quiz:';
@@ -35,6 +42,7 @@ export function sessionFromJoin(r: JoinResponse): LocalSession {
     creator: q.creatorPid === r.pid,
     spec: { pool: q.pool, poolVersion: q.poolVersion, mode: q.mode, items: q.items },
     answers: q.items.map(() => null),
+    synced: q.items.map(() => null),
     flags: q.items.map(() => false),
     current: 0,
     startedAt: Date.now(),
@@ -47,7 +55,9 @@ function valid(s: LocalSession | null): s is LocalSession {
 
 export function loadSession(code: string): LocalSession | null {
   const s = getJSON<LocalSession>(key(code));
-  return valid(s) ? s : null;
+  if (!valid(s)) return null;
+  if (!Array.isArray(s.synced)) s.synced = s.answers.map(() => null); // sessions saved before step 4
+  return s;
 }
 
 export function saveSession(s: LocalSession): void {
@@ -60,8 +70,8 @@ export function listSessions(): LocalSession[] {
   try {
     for (const k of Object.keys(localStorage)) {
       if (!k.startsWith(PREFIX)) continue;
-      const s = getJSON<LocalSession>(k);
-      if (valid(s)) out.push(s);
+      const s = loadSession(k.slice(PREFIX.length));
+      if (s) out.push(s);
     }
   } catch {
     /* storage unavailable */

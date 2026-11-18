@@ -1026,3 +1026,25 @@ a.btn {
 .yq-status.working {
   color: var(--flag);
 }
+
+/* ---------- Step 4: sync status ---------- */
+.sync {
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.sync-saved {
+  color: var(--good);
+}
+.sync-waiting {
+  color: var(--flag);
+}
+.sync-stopped {
+  color: var(--bad);
+}
+@media (max-width: 420px) {
+  .quiz-top .qid {
+    display: none;
+  }
+}

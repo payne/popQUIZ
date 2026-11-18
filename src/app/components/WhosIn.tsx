@@ -12,7 +12,9 @@ export function ParticipantList({ info, myPid }: { info: QuizInfo; myPid?: strin
             {p.pid === myPid && <span class="muted"> (you)</span>}
             {p.pid === info.creatorPid && <span class="tag">started it</span>}
           </span>
-          <span class={`person-status${p.finished ? ' done' : ''}`}>{p.finished ? 'Finished' : 'Working…'}</span>
+          <span class={`person-status${p.finished ? ' done' : ''}`}>
+            {p.finished ? 'Finished' : `${p.answered}/${info.items.length}`}
+          </span>
         </li>
       ))}
     </ul>

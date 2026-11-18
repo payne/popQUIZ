@@ -2,16 +2,18 @@ import { useState } from 'preact/hooks';
 import type { Pool } from '../../shared/pool.ts';
 import { questionMap, scoreQuiz } from '../../shared/quiz.ts';
 import { formatDuration, type LocalSession } from '../session.ts';
+import type { SyncStatus } from '../sync.ts';
 
 interface ResultsProps {
   pool: Pool;
   session: LocalSession;
   onNewQuiz: () => void;
+  syncStatus: SyncStatus;
 }
 
 const LETTERS = ['A', 'B', 'C', 'D'] as const;
 
-export function Results({ pool, session, onNewQuiz }: ResultsProps) {
+export function Results({ pool, session, onNewQuiz, syncStatus }: ResultsProps) {
   const { spec, answers } = session;
   const score = scoreQuiz(pool, spec, answers);
   const byId = questionMap(pool);
@@ -41,6 +43,15 @@ export function Results({ pool, session, onNewQuiz }: ResultsProps) {
           {spec.mode === 'full' && ` · Pass mark ${pool.passing}/${pool.examSize}`}
         </p>
         {session.autoSubmitted && <p class="muted small">The quiz was closed, so your answers were submitted automatically.</p>}
+        {!session.submitSynced && !session.syncStopped && (
+          <p class="muted small">{syncStatus === 'waiting' ? 'Offline — your results will be sent when you reconnect.' : 'Sending your results…'}</p>
+        )}
+        {session.submitSynced && session.serverScore !== undefined && session.serverScore !== score.correct && (
+          <p class="muted small">
+            Recorded score: {session.serverScore}/{score.total} — some answers didn't reach the server before the quiz closed.
+          </p>
+        )}
+        {session.syncStopped && <p class="error small">{session.syncStopped}</p>}
         <button type="button" class="btn btn-primary" onClick={onNewQuiz}>
           New quiz
         </button>

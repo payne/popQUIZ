@@ -32,6 +32,8 @@ export interface ParticipantInfo {
   name: string;
   joinedAt: number;
   finished: boolean;
+  /** How many questions the server has an answer for (progress, e.g. "22/35"). */
+  answered: number;
 }
 
 export interface QuizInfo {
@@ -58,12 +60,35 @@ export interface JoinResponse {
   quiz: QuizInfo;
 }
 
+/** Answers changed since the last sync; `i` is the question index, `choice` 0–3. */
+export interface AnswersRequest {
+  answers: { i: number; choice: number }[];
+}
+
+export interface AnswersResponse {
+  saved: number;
+}
+
+/** Final submit: the full answer list (null = blank). */
+export interface SubmitRequest {
+  answers: (number | null)[];
+}
+
+export interface SubmitResponse {
+  score: number;
+  total: number;
+  finishedAt: number;
+  /** True when the server had already finalised this person (e.g. the quiz was closed). */
+  alreadyFinished: boolean;
+}
+
 export type ApiErrorCode =
   | 'bad_request'
   | 'invalid_name'
   | 'name_taken'
   | 'not_found'
   | 'closed'
+  | 'finished'
   | 'unauthorized'
   | 'forbidden'
   | 'pool_mismatch'

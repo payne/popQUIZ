@@ -87,7 +87,13 @@ Decisions below were settled in a design grilling session on 2026-11-17 (Q1–Q4
 - `POST /api/quizzes` `{pool, mode, count?, subelements?, name}` → `{pid, token, name, quiz}` (creator joins in the same call)
 - `GET /api/quizzes/:code` → quiz info: items, closed?, participants (names, finished)
 - `POST /api/quizzes/:code/participants` `{name}` → `{pid, token, name, quiz}`; 409 `name_taken`, 410 `closed`
-- `POST /api/quizzes/:code/close` (Bearer token, creator only) → closes and marks everyone finished
+- `POST /api/quizzes/:code/close` (Bearer token, creator only) → closes; scores and finishes everyone from the answers the server has
+- `PUT /api/quizzes/:code/answers` (Bearer) `{answers: [{i, choice}]}` → upserts changed answers; 409 `finished`, 410 `closed`
+- `POST /api/quizzes/:code/submit` (Bearer) `{answers: (0-3|null)[]}` → server-computed score; idempotent
+- Quiz info includes each participant's `answered` count (progress, e.g. 22/35)
+- Sync (client): answers go to localStorage first; the difference vs. the server-confirmed copy is sent ~0.6 s after changes,
+  with backoff on failure and an immediate retry on reconnect / tab focus. After a quiz closes, only answers that reached
+  the server count toward the recorded score (shown if it differs from the local one).
 - Local dev: `npx wrangler d1 migrations apply popquiz --local`, then `npm run dev` (Vite runs the Worker + local D1)
 - Deploy: `npm run deploy` (build → remote migrations → `wrangler deploy`)
 
@@ -109,7 +115,7 @@ answers(pid, q_index, choice, answered_at, PRIMARY KEY(pid, q_index))
 1. Pool parser → JSON for all three exams ✅
 2. Single-person local quiz **+ PWA setup** ✅
 3. Worker + D1 + create / join / share ✅
-4. Answer sync
+4. Answer sync ✅
 5. Results + comparisons
 6. Real-device testing
 7. Turnstile + rate limits (join/answer) + cron cleanup

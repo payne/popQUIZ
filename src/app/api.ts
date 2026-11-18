@@ -1,4 +1,13 @@
-import type { ApiErrorBody, ApiErrorCode, CreateQuizRequest, JoinResponse, QuizInfo } from '../shared/api.ts';
+import type {
+  AnswersResponse,
+  ApiErrorBody,
+  ApiErrorCode,
+  CreateQuizRequest,
+  JoinResponse,
+  QuizInfo,
+  SubmitResponse,
+} from '../shared/api.ts';
+import type { Answer } from '../shared/quiz.ts';
 
 export class ApiError extends Error {
   constructor(
@@ -33,4 +42,8 @@ export const api = {
   getQuiz: (code: string) => request<QuizInfo>('GET', `/quizzes/${code}`),
   join: (code: string, name: string) => request<JoinResponse>('POST', `/quizzes/${code}/participants`, { name }),
   close: (code: string, token: string) => request<QuizInfo>('POST', `/quizzes/${code}/close`, undefined, token),
+  saveAnswers: (code: string, token: string, answers: { i: number; choice: number }[]) =>
+    request<AnswersResponse>('PUT', `/quizzes/${code}/answers`, { answers }, token),
+  submit: (code: string, token: string, answers: Answer[]) =>
+    request<SubmitResponse>('POST', `/quizzes/${code}/submit`, { answers }, token),
 };
