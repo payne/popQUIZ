@@ -82,6 +82,47 @@ export interface SubmitResponse {
   alreadyFinished: boolean;
 }
 
+export interface LeaderRow {
+  pid: string;
+  name: string;
+  finished: boolean;
+  /** Answers the server has (progress for people still working). */
+  answered: number;
+  /** Server-recorded score; null until finished. */
+  score: number | null;
+  /** Time from joining to finishing; null until finished. */
+  timeMs: number | null;
+  /** Full exams only; null for custom quizzes or unfinished people. */
+  passed: boolean | null;
+}
+
+/** How everyone who has submitted answered one question. */
+export interface QuestionStat {
+  i: number;
+  id: string;
+  /** Picks for A, B, C, D. */
+  counts: [number, number, number, number];
+  blank: number;
+  correct: number;
+}
+
+export interface ResultsResponse {
+  code: string;
+  mode: QuizMode;
+  total: number;
+  /** Pass mark for full exams; null for custom quizzes. */
+  passing: number | null;
+  closed: boolean;
+  /** Finished people (score desc, then faster time), then people still working. */
+  leaderboard: LeaderRow[];
+  /**
+   * Per-question breakdown over finished participants. Only returned to a participant who has
+   * submitted ("no peeking"); null otherwise.
+   */
+  breakdown: QuestionStat[] | null;
+  finishedCount: number;
+}
+
 export type ApiErrorCode =
   | 'bad_request'
   | 'invalid_name'

@@ -4,6 +4,8 @@ import { api, ApiError } from '../api.ts';
 import { POOL_CHOICES } from '../pools.ts';
 import { usePwa } from '../pwa.ts';
 import { getString, setString } from '../storage.ts';
+import { useResults } from '../results.ts';
+import { Leaderboard } from './Leaderboard.tsx';
 import { ParticipantList } from './WhosIn.tsx';
 
 interface JoinProps {
@@ -50,10 +52,7 @@ export function Join({ info, onJoined }: JoinProps) {
       </section>
 
       {info.closed ? (
-        <section class="notice">
-          <strong>This quiz is closed.</strong>
-          <p>New people can't join anymore. Results comparison is coming soon.</p>
-        </section>
+        <ClosedResults code={info.code} />
       ) : (
         <>
           <fieldset>
@@ -81,10 +80,27 @@ export function Join({ info, onJoined }: JoinProps) {
         </>
       )}
 
-      <section>
-        <h2 class="h-small">Who's in ({info.participants.length})</h2>
-        <ParticipantList info={info} />
-      </section>
+      {!info.closed && (
+        <section>
+          <h2 class="h-small">Who's in ({info.participants.length})</h2>
+          <ParticipantList info={info} />
+        </section>
+      )}
     </form>
+  );
+}
+
+/** Someone who never took part opens a closed quiz: leaderboard only (no question breakdown). */
+function ClosedResults({ code }: { code: string }) {
+  const pwa = usePwa();
+  const { data, error } = useResults(code, undefined, pwa.online);
+  return (
+    <>
+      <section class="notice">
+        <strong>This quiz is closed.</strong>
+        <p>New people can't join anymore. Here's how everyone did.</p>
+      </section>
+      {data ? <Leaderboard data={data} /> : <p class="muted">{error ? error.message : 'Loading results…'}</p>}
+    </>
   );
 }

@@ -10,6 +10,7 @@ import { QuizView } from './components/QuizView.tsx';
 import { Results } from './components/Results.tsx';
 import { Share } from './components/Share.tsx';
 import { WhosIn } from './components/WhosIn.tsx';
+import { LeaderboardDialog } from './components/LeaderboardDialog.tsx';
 import { loadPool, POOL_CHOICES } from './pools.ts';
 import { applyUpdate, dismissUpdate, usePwa } from './pwa.ts';
 import { codeFromPath, navigate, usePath } from './router.ts';
@@ -18,7 +19,7 @@ import { flushAll, unsentCount, useAnswerSync } from './sync.ts';
 
 dropLegacySession();
 
-type Dialog = null | 'share' | 'qr' | 'whos-in' | 'close-quiz';
+type Dialog = null | 'share' | 'qr' | 'whos-in' | 'close-quiz' | 'leaderboard';
 
 export function App() {
   const path = usePath();
@@ -128,6 +129,7 @@ export function App() {
           onShare: () => setDialog('share'),
           onQr: () => setDialog('qr'),
           onWhosIn: () => setDialog('whos-in'),
+          onLeaderboard: () => setDialog('leaderboard'),
           onCloseQuiz: session.creator && !info?.closed ? () => (setCloseError(null), setDialog('close-quiz')) : undefined,
           participantCount: info?.participants.length,
         }
@@ -207,6 +209,9 @@ export function App() {
       )}
       {session && dialog === 'whos-in' && (
         <WhosIn info={info} myPid={session.pid} onRefresh={() => void refreshInfo()} onClose={() => setDialog(null)} />
+      )}
+      {session && dialog === 'leaderboard' && (
+        <LeaderboardDialog code={session.code} token={session.token} myPid={session.pid} onClose={() => setDialog(null)} />
       )}
       {dialog === 'close-quiz' && (
         <Confirm title="Close this quiz?" confirmLabel="Close quiz" danger onCancel={() => setDialog(null)} onConfirm={() => void closeQuiz()}>

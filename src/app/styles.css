@@ -1048,3 +1048,134 @@ a.btn {
     display: none;
   }
 }
+
+/* ---------- Step 5: results comparison ---------- */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs button {
+  flex: 1 1 0;
+  min-height: var(--tap);
+  padding: 4px 6px;
+  line-height: 1.2;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: none;
+  font-weight: 700;
+  color: var(--muted);
+}
+@media (max-width: 480px) {
+  .tabs button {
+    font-size: 0.85rem;
+  }
+}
+.tabs button[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--primary);
+}
+.board {
+  display: grid;
+  gap: 10px;
+}
+.board-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.board-list li {
+  display: grid;
+  grid-template-columns: 2em minmax(0, 1fr) auto auto;
+  grid-template-areas: 'place name score badge' 'place name time time';
+  column-gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  min-height: var(--tap);
+}
+.board-list li + li {
+  border-top: 1px solid var(--border);
+}
+.board-list li.me {
+  background: var(--primary-soft);
+}
+.board-list.working li {
+  grid-template-areas: 'place name score score';
+}
+.place {
+  grid-area: place;
+  font-weight: 800;
+  font-size: 1.1rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.board-list li:nth-child(1) .place {
+  color: #ca8a04;
+}
+.board-name {
+  grid-area: name;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.board-score {
+  grid-area: score;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.board-time {
+  grid-area: time;
+  text-align: right;
+}
+.badge {
+  grid-area: badge;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 99px;
+  text-align: center;
+}
+.badge.pass {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.badge.practice {
+  background: var(--flag-soft);
+  color: var(--flag);
+}
+.review-answers.bars li {
+  grid-template-columns: auto 1fr auto;
+}
+.bar-text {
+  display: grid;
+  gap: 4px;
+}
+.bar {
+  display: block;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.bar span {
+  display: block;
+  height: 100%;
+  background: var(--muted);
+  border-radius: 99px;
+}
+.correct .bar span {
+  background: var(--good);
+}
+.review-answers .mine {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+.mark .you {
+  color: var(--primary);
+}

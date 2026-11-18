@@ -5,6 +5,7 @@ import type {
   CreateQuizRequest,
   JoinResponse,
   QuizInfo,
+  ResultsResponse,
   SubmitResponse,
 } from '../shared/api.ts';
 import type { Answer } from '../shared/quiz.ts';
@@ -44,6 +45,8 @@ export const api = {
   close: (code: string, token: string) => request<QuizInfo>('POST', `/quizzes/${code}/close`, undefined, token),
   saveAnswers: (code: string, token: string, answers: { i: number; choice: number }[]) =>
     request<AnswersResponse>('PUT', `/quizzes/${code}/answers`, { answers }, token),
+  /** Leaderboard for anyone; with a submitted participant's token, also the per-question breakdown. */
+  results: (code: string, token?: string) => request<ResultsResponse>('GET', `/quizzes/${code}/results`, undefined, token),
   submit: (code: string, token: string, answers: Answer[]) =>
     request<SubmitResponse>('POST', `/quizzes/${code}/submit`, { answers }, token),
 };

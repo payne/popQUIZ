@@ -10,7 +10,10 @@ import type {
   CreateQuizRequest,
   JoinRequest,
   JoinResponse,
+  LeaderRow,
+  QuestionStat,
   QuizInfo,
+  ResultsResponse,
   SubmitRequest,
   SubmitResponse,
 } from '../shared/api.ts';
@@ -323,6 +326,86 @@ app.post('/quizzes/:code/submit', async (c) => {
     finishedAt: p?.finished_at ?? now,
     alreadyFinished: me.finished_at !== null,
   } satisfies SubmitResponse);
+});
+
+/**
+ * Leaderboard for anyone with the link; per-question breakdown only for a participant who has
+ * submitted (Bearer token). Individual answers are never exposed — only totals.
+ */
+app.get('/quizzes/:code/results', async (c) => {
+  const code = requireCode(c.req.param('code'));
+  const row = await getQuizRow(c.env.DB, code);
+  const pool = POOLS[row.pool];
+  const items = JSON.parse(row.items_json) as string[];
+  const now = Date.now();
+
+  const { results: people } = await c.env.DB.prepare(
+    `SELECT p.pid, p.display_name, p.joined_at, p.finished_at, p.score,
+            (SELECT COUNT(*) FROM answers a WHERE a.pid = p.pid) AS answered
+       FROM participants p WHERE p.code = ?`,
+  )
+    .bind(code)
+    .all<ParticipantRow & { score: number | null }>();
+
+  const leaderboard: LeaderRow[] = people.map((p) => {
+    const finished = p.finished_at !== null;
+    const score = finished ? (p.score ?? 0) : null;
+    return {
+      pid: p.pid,
+      name: p.display_name,
+      finished,
+      answered: p.answered,
+      score,
+      timeMs: finished ? p.finished_at! - p.joined_at : null,
+      passed: finished && row.mode === 'full' ? score! >= pool.passing : null,
+    };
+  });
+  leaderboard.sort((a, b) =>
+    a.finished !== b.finished
+      ? a.finished
+        ? -1
+        : 1
+      : a.finished
+        ? b.score! - a.score! || a.timeMs! - b.timeMs!
+        : b.answered - a.answered || a.name.localeCompare(b.name),
+  );
+
+  // Optional viewer identity: breakdown only once they've submitted.
+  let breakdown: QuestionStat[] | null = null;
+  const token = c.req.header('Authorization')?.match(/^Bearer (\S+)$/)?.[1];
+  if (token) {
+    const viewer = await c.env.DB.prepare('SELECT finished_at FROM participants WHERE code = ? AND token_hash = ?')
+      .bind(code, await sha256Hex(token))
+      .first<{ finished_at: number | null }>();
+    if (viewer && viewer.finished_at !== null) {
+      const { results: picks } = await c.env.DB.prepare(
+        `SELECT a.q_index, a.choice, COUNT(*) AS n FROM answers a JOIN participants p ON p.pid = a.pid
+          WHERE p.code = ? AND p.finished_at IS NOT NULL GROUP BY a.q_index, a.choice`,
+      )
+        .bind(code)
+        .all<{ q_index: number; choice: number; n: number }>();
+      const finishedCount = leaderboard.filter((r) => r.finished).length;
+      const byId = new Map(pool.questions.map((q) => [q.id, q]));
+      breakdown = items.map((id, i) => ({ i, id, counts: [0, 0, 0, 0], blank: finishedCount, correct: byId.get(id)?.c ?? -1 }));
+      for (const p of picks) {
+        const stat = breakdown[p.q_index];
+        if (!stat || p.choice < 0 || p.choice > 3) continue;
+        stat.counts[p.choice as 0 | 1 | 2 | 3] += p.n;
+        stat.blank -= p.n;
+      }
+    }
+  }
+
+  return c.json({
+    code,
+    mode: row.mode,
+    total: items.length,
+    passing: row.mode === 'full' ? pool.passing : null,
+    closed: isClosed(row, now),
+    leaderboard,
+    breakdown,
+    finishedCount: leaderboard.filter((r) => r.finished).length,
+  } satisfies ResultsResponse);
 });
 
 function upsertAnswer(db: D1Database, pid: string, i: number, choice: number, now: number) {

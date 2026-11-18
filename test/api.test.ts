@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getPlatformProxy } from 'wrangler';
 import { app, isClosed, type Env } from '../src/worker/index.ts';
-import { CODE_RE, normalizeName, nameKey, type JoinResponse, type QuizInfo } from '../src/shared/api.ts';
+import { CODE_RE, normalizeName, nameKey, type JoinResponse, type QuizInfo, type ResultsResponse } from '../src/shared/api.ts';
 import { newCode } from '../src/worker/crypto.ts';
 
 let proxy: Awaited<ReturnType<typeof getPlatformProxy<Env>>>;
@@ -209,5 +209,61 @@ describe('answers and submit', () => {
     const { body: b } = await create();
     const r = await call('PUT', `/quizzes/${a.quiz.code}/answers`, { answers: [{ i: 0, choice: 0 }] }, b.token);
     expect(r.status).toBe(401);
+  });
+});
+
+describe('results', () => {
+  const pool = JSON.parse(readFileSync(join(import.meta.dirname, '../public/pools/tech.json'), 'utf8')) as {
+    questions: { id: string; c: number }[];
+  };
+  const keyFor = (items: string[]) => items.map((id) => pool.questions.find((q) => q.id === id)!.c);
+
+  it('ranks by score then time, lists people still working, and gates the breakdown', async () => {
+    const { body: c } = await create({ name: 'Ann' });
+    const code = c.quiz.code;
+    const key = keyFor(c.quiz.items);
+    const join = async (name: string) => (await call('POST', `/quizzes/${code}/participants`, { name })).body as JoinResponse;
+    const bob = await join('Bob');
+    const cat = await join('Cat');
+    const dan = await join('Dan');
+
+    // Ann: all correct. Bob: 20 correct. Cat: 30 correct (Q1 answered B wrongly). Dan: still working, 3 answered.
+    const wrong = (k: number) => (k + 1) % 4;
+    await call('POST', `/quizzes/${code}/submit`, { answers: key }, c.token);
+    await call('POST', `/quizzes/${code}/submit`, { answers: key.map((k, i) => (i < 20 ? k : null)) }, bob.token);
+    await call('POST', `/quizzes/${code}/submit`, { answers: key.map((k, i) => (i === 0 ? wrong(k) : i < 31 ? k : null)) }, cat.token);
+    await call('PUT', `/quizzes/${code}/answers`, { answers: [0, 1, 2].map((i) => ({ i, choice: wrong(key[i]!) })) }, dan.token);
+
+    const anon = await call('GET', `/quizzes/${code}/results`);
+    const r = anon.body as ResultsResponse;
+    expect(r.leaderboard.map((x) => [x.name, x.score, x.passed])).toEqual([
+      ['Ann', 35, true],
+      ['Cat', 30, true],
+      ['Bob', 20, false],
+      ['Dan', null, null],
+    ]);
+    expect(r.leaderboard[3]).toMatchObject({ finished: false, answered: 3, timeMs: null });
+    expect(r.finishedCount).toBe(3);
+    expect(r.passing).toBe(26);
+    expect(r.breakdown).toBeNull(); // no token → no breakdown
+
+    // No peeking: Dan hasn't submitted.
+    expect((await call('GET', `/quizzes/${code}/results`, undefined, dan.token)).body.breakdown).toBeNull();
+
+    // Ann has submitted: totals over finished people only (Dan's in-progress picks excluded).
+    const mine = (await call('GET', `/quizzes/${code}/results`, undefined, c.token)).body as ResultsResponse;
+    const q0 = mine.breakdown![0]!;
+    expect(q0.correct).toBe(key[0]);
+    expect(q0.counts[key[0]!]).toBe(2); // Ann, Bob
+    expect(q0.counts[wrong(key[0]!)]).toBe(1); // Cat
+    expect(q0.blank).toBe(0);
+    const q34 = mine.breakdown![34]!;
+    expect(q34.counts.reduce((a, b) => a + b, 0)).toBe(1); // only Ann answered the last one
+    expect(q34.blank).toBe(2);
+    expect(JSON.stringify(mine)).not.toMatch(/token/i);
+  });
+
+  it('404s unknown quizzes', async () => {
+    expect((await call('GET', '/quizzes/ZZZZZZ/results')).status).toBe(404);
   });
 });

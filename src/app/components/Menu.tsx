@@ -18,6 +18,7 @@ export interface QuizMenu {
   onShare: () => void;
   onQr: () => void;
   onWhosIn: () => void;
+  onLeaderboard: () => void;
   /** Only for the creator while the quiz is open. */
   onCloseQuiz?: () => void;
   participantCount?: number;
@@ -85,7 +86,11 @@ export function Menu({ open, onClose, onNewQuiz, quiz }: MenuProps) {
                   👥 Who's in{quiz.participantCount ? ` (${quiz.participantCount})` : ''}
                 </button>
               </li>
-              {/* Results comparison arrives in step 5. */}
+              <li>
+                <button type="button" onClick={act(quiz.onLeaderboard)}>
+                  🏆 Leaderboard
+                </button>
+              </li>
               {quiz.onCloseQuiz && (
                 <li>
                   <button type="button" onClick={act(quiz.onCloseQuiz)}>
