@@ -9,7 +9,8 @@ session=$(jq -r '.session_id // "unknown"' <<<"$input")
 
 dir="${CLAUDE_PROJECT_DIR:-$(pwd)}/claude-logs"
 mkdir -p "$dir"
-first_ts=$(jq -r 'select(.type=="user" and .timestamp) | .timestamp' "$transcript" | head -1)
+# first(...) stops jq itself; piping into `head -1` breaks with pipefail (SIGPIPE) on long transcripts.
+first_ts=$(jq -rn 'first(inputs | select(.type=="user" and .timestamp) | .timestamp) // empty' "$transcript" || true)
 day=$(date -d "${first_ts:-now}" +%F 2>/dev/null || date +%F)
 out="$dir/${day}_${session:0:8}.md"
 
