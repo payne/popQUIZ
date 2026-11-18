@@ -7,8 +7,11 @@ import type {
   QuizInfo,
   ResultsResponse,
   SubmitResponse,
+  UsageResponse,
 } from '../shared/api.ts';
+import { DEVICE_HEADER } from '../shared/api.ts';
 import type { Answer } from '../shared/quiz.ts';
+import { deviceId } from './usage.ts';
 
 export class ApiError extends Error {
   constructor(
@@ -21,7 +24,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, path: string, body?: unknown, token?: string): Promise<T> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { [DEVICE_HEADER]: deviceId() };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
   let res: Response;
@@ -49,4 +52,5 @@ export const api = {
   results: (code: string, token?: string) => request<ResultsResponse>('GET', `/quizzes/${code}/results`, undefined, token),
   submit: (code: string, token: string, answers: Answer[]) =>
     request<SubmitResponse>('POST', `/quizzes/${code}/submit`, { answers }, token),
+  usage: () => request<UsageResponse>('GET', '/usage'),
 };

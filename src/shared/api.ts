@@ -158,3 +158,50 @@ export function normalizeName(raw: unknown): string | null {
 export function nameKey(name: string): string {
   return name.normalize('NFKC').toLocaleLowerCase('en-US');
 }
+
+/** Header carrying the app's random per-device id (anonymous usage counts). */
+export const DEVICE_HEADER = 'X-PQ-Device';
+export const DEVICE_RE = /^[A-Za-z0-9_-]{16,64}$/;
+/** Usage events and the /usage page cover this many days. */
+export const USAGE_DAYS = 30;
+
+export interface UsageDevice {
+  /** First 8 hex chars of the hashed device id — enough to tell rows apart, not to identify anyone. */
+  id: string;
+  firstSeen: number;
+  lastSeen: number;
+  /** In the last USAGE_DAYS days. */
+  opens: number;
+  created: number;
+  joined: number;
+  activeDays: number;
+}
+
+export interface UsageDay {
+  /** UTC date, YYYY-MM-DD. */
+  day: string;
+  devices: number;
+  opens: number;
+}
+
+export interface UsageResponse {
+  generatedAt: number;
+  days: number;
+  devices: { total: number; last24h: number; last7d: number; last30d: number; new30d: number; returning30d: number };
+  opens30d: number;
+  quizzes: {
+    created30d: number;
+    open: number;
+    byPool: { pool: PoolId; count: number }[];
+    full: number;
+    custom: number;
+    participants: number;
+    finished: number;
+    avgPerQuiz: number;
+    /** Full exams only, finished participants. */
+    passRate: number | null;
+    answers: number;
+  };
+  daily: UsageDay[];
+  perDevice: UsageDevice[];
+}

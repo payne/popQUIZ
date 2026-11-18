@@ -1213,3 +1213,90 @@ a.qid-link:hover {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* ---------- Usage page ---------- */
+.usage section {
+  display: grid;
+  gap: 10px;
+}
+.usage h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.usage .small {
+  font-size: 0.85rem;
+  margin: 0;
+}
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.stat {
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.stat strong {
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.stat span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.usage-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 120px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.usage-bar {
+  flex: 1;
+  min-height: 1px;
+  background: var(--primary);
+  border-radius: 2px 2px 0 0;
+}
+.usage-axis {
+  display: flex;
+  justify-content: space-between;
+}
+.usage .table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.usage-table th,
+.usage-table td {
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+.usage-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+.usage-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.usage-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.usage-table tr.me td {
+  background: var(--primary-soft);
+}

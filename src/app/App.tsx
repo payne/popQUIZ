@@ -9,6 +9,7 @@ import { Menu, type QuizMenu } from './components/Menu.tsx';
 import { Confirm } from './components/Modal.tsx';
 import { QuizView } from './components/QuizView.tsx';
 import { Results } from './components/Results.tsx';
+import { Usage } from './components/Usage.tsx';
 import { Share } from './components/Share.tsx';
 import { WhosIn } from './components/WhosIn.tsx';
 import { LeaderboardDialog } from './components/LeaderboardDialog.tsx';
@@ -25,14 +26,15 @@ type Dialog = null | 'share' | 'qr' | 'whos-in' | 'close-quiz' | 'leaderboard';
 export function App() {
   const path = usePath();
   const isAbout = path === '/about';
-  const code = isAbout ? null : codeFromPath(path);
+  const isUsage = path === '/usage';
+  const code = isAbout || isUsage ? null : codeFromPath(path);
   const pwa = usePwa();
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
 
   // Unknown paths go home; lower-case codes are rewritten to the canonical /CODE.
   useEffect(() => {
-    if (!code && !isAbout && path !== '/') navigate('/', true);
+    if (!code && !isAbout && !isUsage && path !== '/') navigate('/', true);
     else if (code && path !== `/${code}`) navigate(`/${code}`, true);
   }, [code, path]);
 
@@ -140,6 +142,8 @@ export function App() {
   let content;
   if (isAbout) {
     content = <About />;
+  } else if (isUsage) {
+    content = <Usage online={pwa.online} />;
   } else if (!code) {
     content = <Home onCreated={joined} />;
   } else if (session) {
@@ -206,7 +210,7 @@ export function App() {
 
       <main class="content">{content}</main>
 
-      <Menu open={menuOpen} onClose={() => setMenuOpen(false)} onNewQuiz={() => navigate('/')} onAbout={() => navigate('/about')} quiz={quizMenu} />
+      <Menu open={menuOpen} onClose={() => setMenuOpen(false)} onNewQuiz={() => navigate('/')} onAbout={() => navigate('/about')} onUsage={() => navigate('/usage')} quiz={quizMenu} />
 
       {code && (dialog === 'share' || dialog === 'qr') && (
         <Share code={code} poolName={poolName} qrFirst={dialog === 'qr'} onClose={() => setDialog(null)} />

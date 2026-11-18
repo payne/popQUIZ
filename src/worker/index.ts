@@ -16,8 +16,20 @@ import type {
   ResultsResponse,
   SubmitRequest,
   SubmitResponse,
+  UsageDay,
+  UsageDevice,
+  UsageResponse,
 } from '../shared/api.ts';
-import { CODE_RE, JOIN_WINDOW_MS, RETENTION_MS, nameKey, normalizeName } from '../shared/api.ts';
+import {
+  CODE_RE,
+  DEVICE_HEADER,
+  DEVICE_RE,
+  JOIN_WINDOW_MS,
+  RETENTION_MS,
+  USAGE_DAYS,
+  nameKey,
+  normalizeName,
+} from '../shared/api.ts';
 import type { Pool, PoolId } from '../shared/pool.ts';
 import { buildQuiz, scoreQuiz, type Answer, type QuizSpec } from '../shared/quiz.ts';
 import { cryptoRng, newCode, newId, sha256Hex } from './crypto.ts';
@@ -227,9 +239,164 @@ function isUniqueViolation(e: unknown): boolean {
   return e instanceof Error && /UNIQUE constraint failed/i.test(e.message);
 }
 
+// ---------- anonymous usage counts ----------
+
+type UsageKind = 'open' | 'create' | 'join';
+
+/** SHA-256 of the client's random device id (X-PQ-Device), or null when absent/malformed. */
+async function deviceHash(c: Ctx): Promise<string | null> {
+  const raw = c.req.header(DEVICE_HEADER);
+  return raw && DEVICE_RE.test(raw) ? sha256Hex(raw) : null;
+}
+
+/** Best effort: usage counting must never break the request it rides on. */
+async function recordUsage(c: Ctx, kind: UsageKind, now = Date.now()): Promise<boolean> {
+  const device = await deviceHash(c);
+  if (!device) return false;
+  try {
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO devices (device, first_seen, last_seen) VALUES (?, ?, ?)
+         ON CONFLICT (device) DO UPDATE SET last_seen = MAX(last_seen, excluded.last_seen)`,
+      ).bind(device, now, now),
+      c.env.DB.prepare('INSERT INTO usage_events (device, kind, at) VALUES (?, ?, ?)').bind(device, kind, now),
+    ]);
+    return true;
+  } catch (e) {
+    console.error('usage', e);
+    return false;
+  }
+}
+
+const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+export async function usageStats(db: D1Database, now = Date.now()): Promise<UsageResponse> {
+  const since = now - USAGE_DAYS * DAY_MS;
+  const firstDay = Math.floor(now / DAY_MS) - (USAGE_DAYS - 1);
+  const [counts, perDevice, daily, quizzes, people, passing, answers] = await db.batch([
+    db.prepare(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(last_seen >= ?1), 0) AS d1,
+              COALESCE(SUM(last_seen >= ?2), 0) AS d7,
+              COALESCE(SUM(last_seen >= ?3), 0) AS d30,
+              COALESCE(SUM(first_seen >= ?3), 0) AS new30
+         FROM devices`,
+    ).bind(now - DAY_MS, now - 7 * DAY_MS, since),
+    db.prepare(
+      `SELECT e.device, d.first_seen, d.last_seen,
+              SUM(e.kind = 'open') AS opens, SUM(e.kind = 'create') AS created, SUM(e.kind = 'join') AS joined,
+              COUNT(DISTINCT e.at / ${DAY_MS}) AS active_days
+         FROM usage_events e JOIN devices d ON d.device = e.device
+        WHERE e.at >= ? GROUP BY e.device
+        ORDER BY opens DESC, active_days DESC, d.last_seen DESC LIMIT 500`,
+    ).bind(since),
+    db.prepare(
+      `SELECT e.at / ${DAY_MS} AS day, COUNT(DISTINCT e.device) AS devices, SUM(e.kind = 'open') AS opens
+         FROM usage_events e WHERE e.at >= ? GROUP BY day`,
+    ).bind(firstDay * DAY_MS),
+    db.prepare(
+      `SELECT pool, mode, COUNT(*) AS n, COALESCE(SUM(closed_at IS NULL AND closes_at > ?), 0) AS open
+         FROM quizzes WHERE created_at >= ? GROUP BY pool, mode`,
+    ).bind(now, since),
+    db.prepare(
+      `SELECT COUNT(*) AS n, COALESCE(SUM(p.finished_at IS NOT NULL), 0) AS finished
+         FROM participants p JOIN quizzes q ON q.code = p.code WHERE q.created_at >= ?`,
+    ).bind(since),
+    db.prepare(
+      `SELECT q.pool, p.score, COUNT(*) AS n FROM participants p JOIN quizzes q ON q.code = p.code
+        WHERE q.created_at >= ? AND q.mode = 'full' AND p.finished_at IS NOT NULL GROUP BY q.pool, p.score`,
+    ).bind(since),
+    db.prepare(
+      `SELECT COUNT(*) AS n FROM answers a JOIN participants p ON p.pid = a.pid JOIN quizzes q ON q.code = p.code
+        WHERE q.created_at >= ?`,
+    ).bind(since),
+  ]);
+
+  const c = (counts!.results[0] ?? {}) as { total: number; d1: number; d7: number; d30: number; new30: number };
+  const devices: UsageDevice[] = (
+    perDevice!.results as {
+      device: string;
+      first_seen: number;
+      last_seen: number;
+      opens: number;
+      created: number;
+      joined: number;
+      active_days: number;
+    }[]
+  ).map((r) => ({
+    id: r.device.slice(0, 8),
+    firstSeen: r.first_seen,
+    lastSeen: r.last_seen,
+    opens: r.opens,
+    created: r.created,
+    joined: r.joined,
+    activeDays: r.active_days,
+  }));
+
+  const byDay = new Map((daily!.results as { day: number; devices: number; opens: number }[]).map((r) => [r.day, r]));
+  const days: UsageDay[] = [];
+  for (let d = firstDay; d < firstDay + USAGE_DAYS; d++) {
+    const r = byDay.get(d);
+    days.push({ day: utcDay(d * DAY_MS), devices: r?.devices ?? 0, opens: r?.opens ?? 0 });
+  }
+
+  const qRows = quizzes!.results as { pool: PoolId; mode: 'full' | 'custom'; n: number; open: number }[];
+  const poolCounts = new Map<PoolId, number>();
+  for (const r of qRows) poolCounts.set(r.pool, (poolCounts.get(r.pool) ?? 0) + r.n);
+  const created30d = qRows.reduce((s, r) => s + r.n, 0);
+  const ppl = (people!.results[0] ?? { n: 0, finished: 0 }) as { n: number; finished: number };
+  let passed = 0;
+  let taken = 0;
+  for (const r of passing!.results as { pool: PoolId; score: number | null; n: number }[]) {
+    taken += r.n;
+    if ((r.score ?? 0) >= (POOLS[r.pool]?.passing ?? Infinity)) passed += r.n;
+  }
+
+  return {
+    generatedAt: now,
+    days: USAGE_DAYS,
+    devices: {
+      total: c.total ?? 0,
+      last24h: c.d1 ?? 0,
+      last7d: c.d7 ?? 0,
+      last30d: c.d30 ?? 0,
+      new30d: c.new30 ?? 0,
+      returning30d: devices.filter((d) => d.activeDays >= 2).length,
+    },
+    opens30d: devices.reduce((s, d) => s + d.opens, 0),
+    quizzes: {
+      created30d,
+      open: qRows.reduce((s, r) => s + r.open, 0),
+      byPool: [...poolCounts].map(([pool, count]) => ({ pool, count })).sort((a, b) => b.count - a.count),
+      full: qRows.filter((r) => r.mode === 'full').reduce((s, r) => s + r.n, 0),
+      custom: qRows.filter((r) => r.mode === 'custom').reduce((s, r) => s + r.n, 0),
+      participants: ppl.n,
+      finished: ppl.finished,
+      avgPerQuiz: created30d ? ppl.n / created30d : 0,
+      passRate: taken ? passed / taken : null,
+      answers: ((answers!.results[0] ?? { n: 0 }) as { n: number }).n,
+    },
+    daily: days,
+    perDevice: devices,
+  };
+}
+
 // ---------- routes ----------
 
 app.get('/health', (c) => c.json({ ok: true }));
+
+/** The app calls this once per session (see src/app/usage.ts). */
+app.post('/usage/open', async (c) => {
+  await rateLimit(c.env.RL_WRITE, `ip:${clientIp(c)}`);
+  if (!(await recordUsage(c, 'open'))) throw new ApiError(400, 'bad_request', 'Missing or invalid device id');
+  return c.json({ ok: true });
+});
+
+/** Aggregate, anonymous usage for the /usage page. */
+app.get('/usage', async (c) => {
+  await rateLimit(c.env.RL_READ, `ip:${clientIp(c)}`);
+  return c.json(await usageStats(c.env.DB));
+});
 
 /** Create a quiz; the creator joins it in the same request. */
 app.post('/quizzes', async (c) => {
@@ -280,6 +447,7 @@ app.post('/quizzes', async (c) => {
       if (isUniqueViolation(e)) continue;
       throw e;
     }
+    await recordUsage(c, 'create', now);
     const quiz = await quizInfo(c.env.DB, await getQuizRow(c.env.DB, code), now);
     return c.json({ pid, token, name, quiz } satisfies JoinResponse, 201);
   }
@@ -308,6 +476,7 @@ app.post('/quizzes/:code/participants', async (c) => {
     if (isUniqueViolation(e)) throw new ApiError(409, 'name_taken', `Someone in this quiz is already called “${name}”`);
     throw e;
   }
+  await recordUsage(c, 'join', now);
   const quiz = await quizInfo(c.env.DB, row, now);
   return c.json({ pid, token, name, quiz } satisfies JoinResponse, 201);
 });
@@ -509,9 +678,10 @@ async function finalizeUnfinished(db: D1Database, row: QuizRow, now: number, onl
   );
 }
 
-/** Daily cron: delete quizzes older than 30 days; finalise quizzes whose join window ended. */
+/** Daily cron: delete quizzes and usage events older than 30 days; finalise quizzes whose join window ended. */
 export async function dailyCleanup(env: Env, now = Date.now()): Promise<{ deleted: number; finalized: number }> {
   const del = await env.DB.prepare('DELETE FROM quizzes WHERE created_at < ?').bind(now - RETENTION_MS).run();
+  await env.DB.prepare('DELETE FROM usage_events WHERE at < ?').bind(now - USAGE_DAYS * DAY_MS).run();
   const { results: expired } = await env.DB.prepare(
     `SELECT * FROM quizzes WHERE closed_at IS NULL AND closes_at <= ? LIMIT 500`,
   )

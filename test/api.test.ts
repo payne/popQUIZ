@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getPlatformProxy } from 'wrangler';
 import { app, dailyCleanup, isClosed, type Env } from '../src/worker/index.ts';
-import { CODE_RE, normalizeName, nameKey, type JoinResponse, type QuizInfo, type ResultsResponse } from '../src/shared/api.ts';
+import { CODE_RE, normalizeName, nameKey, type JoinResponse, type QuizInfo, type ResultsResponse, type UsageResponse } from '../src/shared/api.ts';
 import { newCode } from '../src/worker/crypto.ts';
 
 let proxy: Awaited<ReturnType<typeof getPlatformProxy<Env>>>;
@@ -15,7 +15,9 @@ beforeAll(async () => {
   proxy = await getPlatformProxy<Env>({ persist: false, remoteBindings: false });
   // No bot check or rate limits for the functional tests (they have their own tests below).
   env = { DB: proxy.env.DB };
-  const sql = readFileSync(join(import.meta.dirname, '../migrations/0001_init.sql'), 'utf8')
+  const sql = ['0001_init.sql', '0002_usage.sql']
+    .map((f) => readFileSync(join(import.meta.dirname, '../migrations', f), 'utf8'))
+    .join(';\n')
     .replace(/--.*$/gm, '')
     .split(';')
     .map((s) => s.trim())
@@ -366,5 +368,49 @@ describe('expiry and daily cleanup', () => {
     expect(orphans!.n).toBe(0);
     const orphanAnswers = await env.DB.prepare('SELECT COUNT(*) AS n FROM answers WHERE pid = ?').bind(old.pid).first<{ n: number }>();
     expect(orphanAnswers!.n).toBe(0);
+  });
+});
+
+describe('usage', () => {
+  const dev = (id: string) => ({ 'X-PQ-Device': id, 'Content-Type': 'application/json' });
+  const req = (method: string, path: string, headers: Record<string, string>, body?: unknown) =>
+    app.request(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }, env);
+
+  it('rejects an open ping without a valid device id', async () => {
+    expect((await req('POST', '/usage/open', {})).status).toBe(400);
+    expect((await req('POST', '/usage/open', { 'X-PQ-Device': 'short' })).status).toBe(400);
+  });
+
+  it('counts devices, sessions, creates and joins', async () => {
+    const before = (await call('GET', '/usage')).body as UsageResponse;
+    const a = 'deviceAAAAAAAAAAAAAAAA';
+    const b = 'deviceBBBBBBBBBBBBBBBB';
+    expect((await req('POST', '/usage/open', dev(a))).status).toBe(200);
+    await req('POST', '/usage/open', dev(a));
+    await req('POST', '/usage/open', dev(b));
+    const made = (await (await req('POST', '/quizzes', dev(a), { pool: 'tech', mode: 'full', name: 'A' })).json()) as JoinResponse;
+    await req('POST', `/quizzes/${made.quiz.code}/participants`, dev(b), { name: 'B' });
+
+    const { status, body } = await call('GET', '/usage');
+    expect(status).toBe(200);
+    const u = body as UsageResponse;
+    expect(u.devices.last30d).toBe(before.devices.last30d + 2);
+    expect(u.devices.last24h).toBe(before.devices.last24h + 2);
+    expect(u.opens30d).toBe(before.opens30d + 3);
+    expect(u.quizzes.created30d).toBeGreaterThan(before.quizzes.created30d);
+    expect(u.daily).toHaveLength(30);
+    expect(u.daily.at(-1)!.opens).toBeGreaterThanOrEqual(3);
+    const rows = u.perDevice.filter((r) => r.opens > 0);
+    const top = rows.find((r) => r.opens === 2 && r.created === 1);
+    expect(top).toBeDefined();
+    expect(top!.id).toMatch(/^[0-9a-f]{8}$/);
+    expect(u.perDevice.some((r) => r.opens === 1 && r.joined === 1)).toBe(true);
+  });
+
+  it('drops usage events older than 30 days in the daily cleanup', async () => {
+    await env.DB.prepare('INSERT INTO usage_events (device, kind, at) VALUES (?, ?, ?)').bind('old', 'open', Date.now() - 40 * 24 * 3600 * 1000).run();
+    await dailyCleanup(env);
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM usage_events WHERE device = 'old'").first<{ n: number }>();
+    expect(n!.n).toBe(0);
   });
 });

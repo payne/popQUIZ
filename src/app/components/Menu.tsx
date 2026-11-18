@@ -29,10 +29,11 @@ interface MenuProps {
   onClose: () => void;
   onNewQuiz: () => void;
   onAbout: () => void;
+  onUsage: () => void;
   quiz?: QuizMenu;
 }
 
-export function Menu({ open, onClose, onNewQuiz, onAbout, quiz }: MenuProps) {
+export function Menu({ open, onClose, onNewQuiz, onAbout, onUsage, quiz }: MenuProps) {
   const pwa = usePwa();
   const [theme, setTheme] = useState<Theme>(() => (getString('pq:theme') as Theme | null) ?? 'system');
   const [dialog, setDialog] = useState<null | 'reload' | 'reset' | 'ios'>(null);
@@ -120,6 +121,12 @@ export function Menu({ open, onClose, onNewQuiz, onAbout, quiz }: MenuProps) {
           <li>
             <button type="button" onClick={act(onAbout)}>
               ⓘ About
+            </button>
+          </li>
+          <li>
+            <button type="button" onClick={act(onUsage)}>
+              📊 Usage
+              <small>How many devices use Pop Quiz</small>
             </button>
           </li>
           <li class="menu-theme">
