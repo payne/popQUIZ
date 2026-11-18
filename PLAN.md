@@ -98,7 +98,7 @@ answers(pid, q_index, choice, answered_at, PRIMARY KEY(pid, q_index))
 ## Build order
 
 1. Pool parser → JSON for all three exams ✅
-2. Single-person local quiz **+ PWA setup**
+2. Single-person local quiz **+ PWA setup** ✅
 3. Worker + D1 + create / join / share
 4. Answer sync
 5. Results + comparisons
