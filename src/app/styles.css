@@ -1188,3 +1188,13 @@ a.btn {
   display: flex;
   justify-content: center;
 }
+
+/* Question id → HamStudy explanation link */
+a.qid-link {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+a.qid-link:hover {
+  text-decoration-style: solid;
+}

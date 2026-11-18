@@ -1,6 +1,7 @@
 import type { QuestionStat } from '../../shared/api.ts';
 import type { Pool } from '../../shared/pool.ts';
 import { questionMap, type Answer } from '../../shared/quiz.ts';
+import { QuestionId } from './QuestionId.tsx';
 
 const LETTERS = ['A', 'B', 'C', 'D'] as const;
 
@@ -27,7 +28,7 @@ export function GroupAnswers({ pool, breakdown, finishedCount, myAnswers }: Grou
         return (
           <li class={right === finishedCount ? 'right' : 'wrong'}>
             <p class="review-head">
-              <strong>Q{s.i + 1}</strong> <span class="muted">{q.id}</span>
+              <strong>Q{s.i + 1}</strong> <QuestionId pool={pool} q={q} />
               <span class="tag">
                 {right} of {finishedCount} got it
               </span>

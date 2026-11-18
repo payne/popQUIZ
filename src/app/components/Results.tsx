@@ -7,6 +7,7 @@ import { formatDuration, type LocalSession } from '../session.ts';
 import type { SyncStatus } from '../sync.ts';
 import { GroupAnswers } from './GroupAnswers.tsx';
 import { Leaderboard } from './Leaderboard.tsx';
+import { QuestionId } from './QuestionId.tsx';
 
 interface ResultsProps {
   pool: Pool;
@@ -126,7 +127,7 @@ export function Results({ pool, session, onNewQuiz, syncStatus }: ResultsProps) 
           q ? (
             <li class={a === q.c ? 'right' : 'wrong'}>
               <p class="review-head">
-                <strong>Q{i + 1}</strong> <span class="muted">{q.id}</span>
+                <strong>Q{i + 1}</strong> <QuestionId pool={pool} q={q} />
                 {a === null && <span class="tag">blank</span>}
               </p>
               <p class="review-q">{q.q}</p>
