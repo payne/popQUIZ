@@ -46,6 +46,8 @@ export const api = {
   getQuiz: (code: string) => request<QuizInfo>('GET', `/quizzes/${code}`),
   join: (code: string, name: string) => request<JoinResponse>('POST', `/quizzes/${code}/participants`, { name }),
   close: (code: string, token: string) => request<QuizInfo>('POST', `/quizzes/${code}/close`, undefined, token),
+  /** Deletes this participant and their answers from the server. */
+  leave: (code: string, token: string) => request<{ ok: true }>('DELETE', `/quizzes/${code}/participants/me`, undefined, token),
   saveAnswers: (code: string, token: string, answers: { i: number; choice: number }[]) =>
     request<AnswersResponse>('PUT', `/quizzes/${code}/answers`, { answers }, token),
   /** Leaderboard for anyone; with a submitted participant's token, also the per-question breakdown. */

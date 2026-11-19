@@ -21,6 +21,8 @@ export interface QuizMenu {
   onLeaderboard: () => void;
   /** Only for the creator while the quiz is open. */
   onCloseQuiz?: () => void;
+  /** Delete my participation (name and answers) from this quiz. */
+  onLeave: () => void;
   participantCount?: number;
 }
 
@@ -101,6 +103,12 @@ export function Menu({ open, onClose, onNewQuiz, onAbout, onUsage, quiz }: MenuP
                   </button>
                 </li>
               )}
+              <li>
+                <button type="button" class="danger" onClick={act(quiz.onLeave)}>
+                  🗑 Leave quiz
+                  <small>Delete your name and answers</small>
+                </button>
+              </li>
             </>
           )}
           <li>

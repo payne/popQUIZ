@@ -495,6 +495,24 @@ app.post('/quizzes/:code/close', async (c) => {
   return c.json(await quizInfo(c.env.DB, await getQuizRow(c.env.DB, code), now));
 });
 
+/**
+ * Leave a quiz: deletes the caller's participant row and answers from the server. If the creator
+ * leaves, nobody can close the quiz early any more (it still closes after 7 days). If nobody is
+ * left, the quiz itself is deleted.
+ */
+app.delete('/quizzes/:code/participants/me', async (c) => {
+  const code = requireCode(c.req.param('code'));
+  const { pid } = await requireParticipant(c, code);
+  const db = c.env.DB;
+  await db.batch([
+    db.prepare('DELETE FROM answers WHERE pid = ?').bind(pid),
+    db.prepare('DELETE FROM participants WHERE pid = ?').bind(pid),
+    db.prepare('UPDATE quizzes SET creator_pid = NULL WHERE code = ? AND creator_pid = ?').bind(code, pid),
+    db.prepare('DELETE FROM quizzes WHERE code = ? AND NOT EXISTS (SELECT 1 FROM participants WHERE code = ?)').bind(code, code),
+  ]);
+  return c.json({ ok: true });
+});
+
 /** Save answers changed since the last sync. Rejected once the person has submitted or the quiz has closed. */
 app.put('/quizzes/:code/answers', async (c) => {
   const code = requireCode(c.req.param('code'));

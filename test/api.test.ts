@@ -133,6 +133,38 @@ describe('close quiz', () => {
   });
 });
 
+describe('leave quiz', () => {
+  it('deletes only the caller and their answers; the last one out deletes the quiz', async () => {
+    const { body: c } = await create();
+    const code = c.quiz.code;
+    const { body: bob } = await call('POST', `/quizzes/${code}/participants`, { name: 'Bob' });
+    await call('PUT', `/quizzes/${code}/answers`, { answers: [{ i: 0, choice: 1 }, { i: 1, choice: 2 }] }, bob.token);
+
+    expect((await call('DELETE', `/quizzes/${code}/participants/me`)).status).toBe(401);
+    expect((await call('DELETE', `/quizzes/${code}/participants/me`, undefined, 'bogus')).status).toBe(401);
+
+    expect((await call('DELETE', `/quizzes/${code}/participants/me`, undefined, bob.token)).status).toBe(200);
+    const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM answers WHERE pid = ?').bind(bob.pid).first<{ n: number }>();
+    expect(left!.n).toBe(0);
+    const info = (await call('GET', `/quizzes/${code}`)).body as QuizInfo;
+    expect(info.participants.map((p) => p.name)).toEqual(['N3PAY']);
+    expect((await call('GET', `/quizzes/${code}/results`)).body.leaderboard).toHaveLength(1);
+    // Bob's token no longer works; his name is free again.
+    expect((await call('PUT', `/quizzes/${code}/answers`, { answers: [{ i: 0, choice: 0 }] }, bob.token)).status).toBe(401);
+    expect((await call('POST', `/quizzes/${code}/participants`, { name: 'bob' })).status).toBe(201);
+
+    // The creator leaves: the quiz stays for the others but has no creator.
+    expect((await call('DELETE', `/quizzes/${code}/participants/me`, undefined, c.token)).status).toBe(200);
+    expect(((await call('GET', `/quizzes/${code}`)).body as QuizInfo).creatorPid).toBeNull();
+  });
+
+  it('deletes the quiz when nobody is left', async () => {
+    const { body: c } = await create();
+    expect((await call('DELETE', `/quizzes/${c.quiz.code}/participants/me`, undefined, c.token)).status).toBe(200);
+    expect((await call('GET', `/quizzes/${c.quiz.code}`)).status).toBe(404);
+  });
+});
+
 describe('names and codes', () => {
   it('normalises names', () => {
     expect(normalizeName('  Mary   Ann ')).toBe('Mary Ann');

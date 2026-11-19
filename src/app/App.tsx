@@ -16,12 +16,12 @@ import { LeaderboardDialog } from './components/LeaderboardDialog.tsx';
 import { loadPool, POOL_CHOICES } from './pools.ts';
 import { applyUpdate, dismissUpdate, usePwa } from './pwa.ts';
 import { codeFromPath, navigate, usePath } from './router.ts';
-import { dropLegacySession, loadSession, saveSession, sessionFromJoin, type LocalSession } from './session.ts';
+import { dropLegacySession, loadSession, removeSession, saveSession, sessionFromJoin, type LocalSession } from './session.ts';
 import { flushAll, unsentCount, useAnswerSync } from './sync.ts';
 
 dropLegacySession();
 
-type Dialog = null | 'share' | 'qr' | 'whos-in' | 'close-quiz' | 'leaderboard';
+type Dialog = null | 'share' | 'qr' | 'whos-in' | 'close-quiz' | 'leaderboard' | 'leave';
 
 export function App() {
   const path = usePath();
@@ -124,6 +124,28 @@ export function App() {
     }
   };
 
+  const [leaveError, setLeaveError] = useState<string | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const leaveQuiz = async () => {
+    if (!session || leaving) return;
+    setLeaving(true);
+    try {
+      await api.leave(session.code, session.token);
+    } catch (e) {
+      // Already gone on the server (quiz deleted / token unknown): just forget it locally.
+      if (!(e instanceof ApiError && (e.code === 'unauthorized' || e.code === 'not_found'))) {
+        setLeaveError(e instanceof ApiError ? e.message : 'Could not leave the quiz');
+        setLeaving(false);
+        return;
+      }
+    }
+    removeSession(session.code);
+    setSession(null);
+    setDialog(null);
+    setLeaving(false);
+    navigate('/');
+  };
+
   const ready = session && pool?.id === session.spec.pool ? pool : null;
   const poolName = POOL_CHOICES.find((p) => p.id === poolId)?.name ?? 'ham radio';
   const quizMenu: QuizMenu | undefined =
@@ -135,6 +157,7 @@ export function App() {
           onWhosIn: () => setDialog('whos-in'),
           onLeaderboard: () => setDialog('leaderboard'),
           onCloseQuiz: session.creator && !info?.closed ? () => (setCloseError(null), setDialog('close-quiz')) : undefined,
+          onLeave: () => (setLeaveError(null), setDialog('leave')),
           participantCount: info?.participants.length,
         }
       : undefined;
@@ -227,6 +250,24 @@ export function App() {
           <p>Everyone can still see their results.</p>
           {!pwa.online && <p class="error">You're offline — closing needs a connection.</p>}
           {closeError && <p class="error">{closeError}</p>}
+        </Confirm>
+      )}
+      {session && dialog === 'leave' && (
+        <Confirm
+          title="Leave this quiz?"
+          confirmLabel={leaving ? 'Deleting…' : 'Leave and delete'}
+          danger
+          onCancel={() => setDialog(null)}
+          onConfirm={() => void leaveQuiz()}
+        >
+          <p>
+            <strong>Your name, answers and score are deleted</strong> from this quiz on the server and on this device. You'll
+            disappear from the leaderboard.
+          </p>
+          {session.creator && <p>You started this quiz — after you leave, nobody can close it early.</p>}
+          <p>This can't be undone.</p>
+          {!pwa.online && <p class="error">You're offline — leaving needs a connection.</p>}
+          {leaveError && <p class="error">{leaveError}</p>}
         </Confirm>
       )}
 

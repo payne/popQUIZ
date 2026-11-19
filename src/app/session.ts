@@ -64,6 +64,11 @@ export function saveSession(s: LocalSession): void {
   setJSON(key(s.code), s);
 }
 
+/** Forgets this device's copy of a quiz (after leaving it). */
+export function removeSession(code: string): void {
+  setString(key(code), null);
+}
+
 /** Every quiz this browser has joined, newest first. */
 export function listSessions(): LocalSession[] {
   const out: LocalSession[] = [];
